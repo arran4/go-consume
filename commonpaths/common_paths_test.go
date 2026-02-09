@@ -21,7 +21,7 @@ func sortMatchPairs(mps []*MatchPair) {
 	})
 }
 
-func TestCommonPrefixSplit(t *testing.T) {
+func TestCommonPaths(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    []string
@@ -127,7 +127,7 @@ func TestCommonPrefixSplit(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := CommonPrefixSplit(tt.input)
+			result := CommonPaths(tt.input)
 
 			// Sort both expected and result to ignore order
 			sortMatchPairs(result)
@@ -138,7 +138,7 @@ func TestCommonPrefixSplit(t *testing.T) {
 			sortMatchPairs(expectedCopy)
 
 			if diff := cmp.Diff(expectedCopy, result); diff != "" {
-				t.Errorf("CommonPrefixSplit() mismatch (-expected +got):\n%s", diff)
+				t.Errorf("CommonPaths() mismatch (-expected +got):\n%s", diff)
 			}
 		})
 	}

@@ -81,7 +81,9 @@ func commonPrefixSplitMapRecursive(result []*MatchPair, all, path []string, sp i
 	return result
 }
 
-func commonPrefixSplitMapWrapper(all []string) []*MatchPair {
+// CommonPathsMap is the original map-based implementation (CommonPrefixSplit).
+// It is exposed primarily for benchmarking comparisons.
+func CommonPathsMap(all []string) []*MatchPair {
 	result := make([]*MatchPair, 0, len(all))
 	return commonPrefixSplitMapRecursive(result, all, nil, 0, slices.Collect(func(yield func(int) bool) {
 		for i := range all {
@@ -92,7 +94,9 @@ func commonPrefixSplitMapWrapper(all []string) []*MatchPair {
 	}))
 }
 
-func CommonPrefixSplit(all []string) []*MatchPair {
+// CommonPaths uses a sort-based approach to find common path segments.
+// This is significantly faster and uses less memory than the map-based approach.
+func CommonPaths(all []string) []*MatchPair {
 	if len(all) == 0 {
 		return []*MatchPair{}
 	}

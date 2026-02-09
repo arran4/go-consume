@@ -44,12 +44,12 @@ func generatePaths(count int, depth int, width int) []string {
 	return paths
 }
 
-func BenchmarkCommonPrefixSplit_Map(b *testing.B) {
-	runBenchmark(b, commonPrefixSplitMapWrapper)
+func BenchmarkCommonPaths_Map(b *testing.B) {
+	runBenchmark(b, CommonPathsMap)
 }
 
-func BenchmarkCommonPrefixSplit_Sort(b *testing.B) {
-	runBenchmark(b, CommonPrefixSplit)
+func BenchmarkCommonPaths_Sort(b *testing.B) {
+	runBenchmark(b, CommonPaths)
 }
 
 func runBenchmark(b *testing.B, fn func([]string) []*MatchPair) {
