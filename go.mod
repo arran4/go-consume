@@ -2,7 +2,10 @@ module github.com/arran4/go-consume
 
 go 1.25.5
 
-require github.com/stretchr/testify v1.11.1
+require (
+	github.com/google/go-cmp v0.7.0
+	github.com/stretchr/testify v1.11.1
+)
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
