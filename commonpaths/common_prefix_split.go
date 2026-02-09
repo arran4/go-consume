@@ -1,4 +1,4 @@
-package gogenmux
+package commonpaths
 
 import "slices"
 

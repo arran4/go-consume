@@ -1,4 +1,4 @@
-package gogenmux
+package commonpaths
 
 import (
 	"fmt"
@@ -81,6 +81,14 @@ func runBenchmark(b *testing.B, fn func([]string) []*MatchPair) {
 	b.Run("NoShared_100", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			fn(noShared)
+		}
+	})
+
+	// Dense prefixes scenario (highly overlapping)
+	dense := generatePaths(1000, 10, 2) // Depth 10, width 2 -> 1024 leaves
+	b.Run("DensePrefixes_1000", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			fn(dense)
 		}
 	})
 }
