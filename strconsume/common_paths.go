@@ -1,4 +1,4 @@
-package commonpaths
+package strconsume
 
 import "slices"
 
