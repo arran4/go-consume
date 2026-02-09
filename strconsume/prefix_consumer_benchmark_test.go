@@ -5,20 +5,20 @@ import (
 	"testing"
 )
 
-// Reuse generatePaths from common_paths_benchmark_test.go
+// Reuse generatePaths from common_paths_benchmark_test.go (same package)
 
-func BenchmarkPrefixSearch_LongestPrefix(b *testing.B) {
-	runPrefixSearchBenchmark(b, func(ps *PrefixSearcher, text string) {
+func BenchmarkPrefixConsumer_LongestPrefix(b *testing.B) {
+	runPrefixConsumerBenchmark(b, func(ps *PrefixConsumer, text string) {
 		ps.LongestPrefix(text)
 	})
 }
 
-func runPrefixSearchBenchmark(b *testing.B, fn func(*PrefixSearcher, string)) {
+func runPrefixConsumerBenchmark(b *testing.B, fn func(*PrefixConsumer, string)) {
 	inputSizes := []int{10, 100, 1000, 10000}
 
 	for _, size := range inputSizes {
 		paths := generatePaths(size, 5, 5)
-		ps := NewPrefixSearcher(paths)
+		ps := NewPrefixConsumer(paths)
 
 		// Generate some test inputs
 		inputs := make([]string, 1000)

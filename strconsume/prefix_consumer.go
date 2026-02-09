@@ -2,6 +2,7 @@ package strconsume
 
 import (
 	"slices"
+	"github.com/arran4/go-consume"
 )
 
 type trieNode struct {
@@ -11,13 +12,13 @@ type trieNode struct {
 	fullPath string
 }
 
-type PrefixSearcher struct {
+type PrefixConsumer struct {
 	root *trieNode
 }
 
-func NewPrefixSearcher(paths []string) *PrefixSearcher {
+func NewPrefixConsumer(paths []string) *PrefixConsumer {
 	if len(paths) == 0 {
-		return &PrefixSearcher{root: &trieNode{}}
+		return &PrefixConsumer{root: &trieNode{}}
 	}
 	sorted := make([]string, len(paths))
 	copy(sorted, paths)
@@ -81,12 +82,12 @@ func NewPrefixSearcher(paths []string) *PrefixSearcher {
 
 	insert(root, 0, len(sorted), 0)
 
-	return &PrefixSearcher{root: root}
+	return &PrefixConsumer{root: root}
 }
 
 // LongestPrefix finds the longest string in the set of paths that is a prefix of the input text.
 // It returns the matching prefix and true if found, otherwise empty string and false.
-func (ps *PrefixSearcher) LongestPrefix(text string) (string, bool) {
+func (ps *PrefixConsumer) LongestPrefix(text string) (string, bool) {
 	curr := ps.root
 	match := ""
 	hasMatch := false
@@ -130,4 +131,34 @@ func (ps *PrefixSearcher) LongestPrefix(text string) (string, bool) {
 	}
 
 	return match, hasMatch
+}
+
+func (ps *PrefixConsumer) Consume(from string, ops ...any) (string, string, string, bool) {
+	inclusive := false
+	startOffset := 0
+	ignore0PositionMatch := false
+	for _, op := range ops {
+		switch v := op.(type) {
+		case consume.Inclusive:
+			inclusive = bool(v)
+		case consume.StartOffset:
+			startOffset = int(v)
+		case consume.Ignore0PositionMatch:
+			ignore0PositionMatch = bool(v)
+		}
+	}
+	for i := startOffset; i < len(from); i++ {
+		match, found := ps.LongestPrefix(from[i:])
+		if found {
+			if i == 0 && ignore0PositionMatch {
+				continue
+			}
+			matched := from[:i]
+			if inclusive {
+				return matched + match, match, from[i+len(match):], true
+			}
+			return matched, match, from[i:], true
+		}
+	}
+	return "", "", from, false
 }
