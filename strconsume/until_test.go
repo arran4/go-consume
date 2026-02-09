@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestConsumeUntiler_Consume(t *testing.T) {
+func TestUntilConsumer_Consume(t *testing.T) {
 	tests := []struct {
 		name              string
 		seps              []string
@@ -148,11 +148,21 @@ func TestConsumeUntiler_Consume(t *testing.T) {
 			expectedRemaining: "bar",
 			expectedOk:        true,
 		},
+		{
+			name:              "Case insensitive match",
+			seps:              []string{"/Foo/"},
+			input:             "/foo/bar",
+			ops:               []any{consume.Inclusive(true), consume.CaseInsensitive(true)},
+			expectedMatched:   "/foo/",
+			expectedSeparator: "/foo/",
+			expectedRemaining: "bar",
+			expectedOk:        true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cu := NewConsumeUntiler(tt.seps...)
+			cu := NewUntilConsumer(tt.seps...)
 			matched, sep, remaining, ok := cu.Consume(tt.input, tt.ops...)
 			assert.Equal(t, tt.expectedOk, ok)
 			if ok {
