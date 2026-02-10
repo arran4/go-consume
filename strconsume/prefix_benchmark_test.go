@@ -5,7 +5,44 @@ import (
 	"testing"
 )
 
-// Reuse generatePaths from common_paths_benchmark_test.go (same package)
+// Helper to generate paths
+func generatePaths(count int, depth int, width int) []string {
+	paths := make([]string, 0, count)
+
+	// Characters to use
+	chars := "abcdefghijklmnopqrstuvwxyz"
+
+	// Recursive helper
+	var generate func(currentPath string, currentDepth int)
+	generate = func(currentPath string, currentDepth int) {
+		if len(paths) >= count {
+			return
+		}
+		if currentDepth >= depth {
+			paths = append(paths, currentPath)
+			return
+		}
+
+		for i := 0; i < width; i++ {
+			// Deterministic pseudo-random char selection
+			charIdx := (len(paths) + i + currentDepth) % len(chars)
+			segment := string(chars[charIdx])
+			generate(currentPath+"/"+segment, currentDepth+1)
+			if len(paths) >= count {
+				return
+			}
+		}
+	}
+
+	generate("", 0)
+
+	// If we didn't fill up, just duplicate
+	for len(paths) < count {
+		paths = append(paths, paths[0])
+	}
+
+	return paths
+}
 
 func BenchmarkPrefixConsumer_LongestPrefix(b *testing.B) {
 	runPrefixConsumerBenchmark(b, func(ps *PrefixConsumer, text string) {
