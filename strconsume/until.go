@@ -1,6 +1,7 @@
 package strconsume
 
 import (
+	"bufio"
 	"sort"
 	"strings"
 
@@ -93,4 +94,72 @@ func (cu UntilConsumer) Consume(from string, ops ...any) (string, string, string
 		}
 	}
 	return "", "", from, false
+}
+
+func (cu UntilConsumer) SplitFunc(ops ...any) bufio.SplitFunc {
+	inclusive := false
+	startOffset := 0
+	ignore0PositionMatch := false
+	caseInsensitive := false
+	for _, op := range ops {
+		switch v := op.(type) {
+		case consume.Inclusive:
+			inclusive = bool(v)
+		case consume.StartOffset:
+			startOffset = int(v)
+		case consume.Ignore0PositionMatch:
+			ignore0PositionMatch = bool(v)
+		case consume.CaseInsensitive:
+			caseInsensitive = bool(v)
+		}
+	}
+	return func(data []byte, atEOF bool) (advance int, token []byte, err error) {
+		if atEOF && len(data) == 0 {
+			return 0, nil, nil
+		}
+
+		for i := startOffset; i < len(data); i++ {
+			for _, size := range cu.sizes {
+				if i+size > len(data) {
+					continue
+				}
+				extract := data[i : i+size]
+				extractStr := string(extract)
+
+				match := false
+
+				if !caseInsensitive {
+					if _, ok := cu.matchers[size][extractStr]; ok {
+						match = true
+					}
+				} else {
+					for s := range cu.matchers[size] {
+						if strings.EqualFold(extractStr, s) {
+							match = true
+							break
+						}
+					}
+				}
+
+				if match {
+					if i == 0 && ignore0PositionMatch {
+						continue
+					}
+
+					advance = i + size
+					if inclusive {
+						token = data[:i+size]
+					} else {
+						token = data[:i]
+					}
+					return advance, token, nil
+				}
+			}
+		}
+
+		if atEOF {
+			return len(data), data, nil
+		}
+		return 0, nil, nil
+	}
 }

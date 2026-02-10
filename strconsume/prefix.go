@@ -1,6 +1,7 @@
 package strconsume
 
 import (
+	"bufio"
 	"sort"
 	"strings"
 
@@ -69,4 +70,51 @@ func (pc PrefixConsumer) Consume(from string, ops ...any) (string, string, bool)
 		}
 	}
 	return "", from, false
+}
+
+func (pc PrefixConsumer) SplitFunc(ops ...any) bufio.SplitFunc {
+	caseInsensitive := false
+	for _, op := range ops {
+		switch v := op.(type) {
+		case consume.CaseInsensitive:
+			caseInsensitive = bool(v)
+		}
+	}
+
+	return func(data []byte, atEOF bool) (advance int, token []byte, err error) {
+		if atEOF && len(data) == 0 {
+			return 0, nil, nil
+		}
+
+		for _, size := range pc.sizes {
+			if size > len(data) {
+				continue
+			}
+			extract := data[:size]
+			extractStr := string(extract)
+
+			match := false
+			if !caseInsensitive {
+				if _, ok := pc.matchers[size][extractStr]; ok {
+					match = true
+				}
+			} else {
+				for p := range pc.matchers[size] {
+					if strings.EqualFold(extractStr, p) {
+						match = true
+						break
+					}
+				}
+			}
+
+			if match {
+				return size, extract, nil
+			}
+		}
+
+		if atEOF {
+			return 0, nil, nil
+		}
+		return 0, nil, nil
+	}
 }
