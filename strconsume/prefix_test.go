@@ -175,3 +175,53 @@ func TestPrefixConsumer_Consume(t *testing.T) {
 		t.Errorf("Consume (Ignore0 with later) matched = %q, expected %q", matched, "/sep")
 	}
 }
+
+func TestPrefixConsumer_Consume_MustBeFollowedBy(t *testing.T) {
+	pc := NewPrefixConsumer([]string{"/sep"})
+	delimiter := func(r rune) bool { return r == '/' }
+
+	// Input: prefix/sep/suffix
+	// Match /sep. Next char /. Matches delimiter.
+	_, separator, _, found := pc.Consume("prefix/sep/suffix", consume.MustBeFollowedBy(delimiter))
+	if !found {
+		t.Errorf("Consume failed")
+	}
+	if separator != "/sep" {
+		t.Errorf("Got %q, expected %q", separator, "/sep")
+	}
+
+	// Input: prefix/sepSuffix
+	// Match /sep. Next char S. Not delimiter. Should FAIL to match at this position?
+	// But Consume scans.
+	// Is there another match? No.
+	_, separator, _, found = pc.Consume("prefix/sepSuffix", consume.MustBeFollowedBy(delimiter))
+	if found {
+		t.Errorf("Consume found match when not followed by delimiter: %s", separator)
+	}
+
+	// Input: prefix/sep
+	// Match /sep. Next char EOF. Should pass.
+	_, separator, _, found = pc.Consume("prefix/sep", consume.MustBeFollowedBy(delimiter))
+	if !found {
+		t.Errorf("Consume failed at EOF")
+	}
+	if separator != "/sep" {
+		t.Errorf("Got %q, expected %q", separator, "/sep")
+	}
+}
+
+func TestPrefixConsumer_Consume_MustBeAtEnd(t *testing.T) {
+	pc := NewPrefixConsumer([]string{"/sep"})
+
+	// Match at end
+	_, _, _, found := pc.Consume("prefix/sep", consume.MustBeAtEnd(true))
+	if !found {
+		t.Errorf("Consume (MustBeAtEnd) failed at end")
+	}
+
+	// Match not at end
+	_, _, _, found = pc.Consume("prefix/sep/suffix", consume.MustBeAtEnd(true))
+	if found {
+		t.Errorf("Consume (MustBeAtEnd) found match not at end")
+	}
+}

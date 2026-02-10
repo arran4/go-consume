@@ -2,6 +2,7 @@ package strconsume
 
 import (
 	"slices"
+	"unicode/utf8"
 	"github.com/arran4/go-consume"
 )
 
@@ -137,6 +138,8 @@ func (ps *PrefixConsumer) Consume(from string, ops ...any) (string, string, stri
 	inclusive := false
 	startOffset := 0
 	ignore0PositionMatch := false
+	var mustBeFollowedBy consume.MustBeFollowedBy
+	mustBeAtEnd := false
 	for _, op := range ops {
 		switch v := op.(type) {
 		case consume.Inclusive:
@@ -145,11 +148,33 @@ func (ps *PrefixConsumer) Consume(from string, ops ...any) (string, string, stri
 			startOffset = int(v)
 		case consume.Ignore0PositionMatch:
 			ignore0PositionMatch = bool(v)
+		case consume.MustBeFollowedBy:
+			mustBeFollowedBy = v
+		case consume.MustBeAtEnd:
+			mustBeAtEnd = bool(v)
 		}
 	}
 	for i := startOffset; i < len(from); i++ {
 		match, found := ps.LongestPrefix(from[i:])
 		if found {
+			nextIdx := i + len(match)
+			if mustBeAtEnd {
+				if nextIdx != len(from) {
+					continue
+				}
+			}
+
+			if mustBeFollowedBy != nil {
+				if nextIdx < len(from) {
+					r, _ := utf8.DecodeRuneInString(from[nextIdx:])
+					if !mustBeFollowedBy(r) {
+						continue
+					}
+				}
+				// If at end of string, we assume match is valid (boundary reached) unless controlled by another option?
+				// mustBeFollowedBy checks "if followed by X". EOF is valid boundary.
+			}
+
 			if i == 0 && ignore0PositionMatch {
 				continue
 			}
