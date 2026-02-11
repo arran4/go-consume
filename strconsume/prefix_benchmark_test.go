@@ -55,7 +55,7 @@ func runPrefixConsumerBenchmark(b *testing.B, fn func(*PrefixConsumer, string)) 
 
 	for _, size := range inputSizes {
 		paths := generatePaths(size, 5, 5)
-		ps := NewPrefixConsumer(paths)
+		ps := NewPrefixConsumer(paths...)
 
 		// Generate some test inputs
 		inputs := make([]string, 1000)

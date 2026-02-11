@@ -217,7 +217,7 @@ func TestPrefixConsumer_Iterator(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pc := NewPrefixConsumer(tt.prefixes)
+			pc := NewPrefixConsumer(tt.prefixes...)
 			iter := pc.Iterator(tt.input, tt.ops...)
 			var actual []struct {
 				matched string

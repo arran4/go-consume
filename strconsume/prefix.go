@@ -19,7 +19,7 @@ type PrefixConsumer struct {
 	root *trieNode
 }
 
-func NewPrefixConsumer(paths []string) *PrefixConsumer {
+func NewPrefixConsumer(paths ...string) *PrefixConsumer {
 	if len(paths) == 0 {
 		return &PrefixConsumer{root: &trieNode{}}
 	}

@@ -101,7 +101,7 @@ func TestPrefixConsumer(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ps := NewPrefixConsumer(tt.paths)
+			ps := NewPrefixConsumer(tt.paths...)
 			got, found := ps.LongestPrefix(tt.input)
 			if found != tt.found {
 				t.Errorf("LongestPrefix() found = %v, expected %v", found, tt.found)
@@ -114,7 +114,7 @@ func TestPrefixConsumer(t *testing.T) {
 }
 
 func TestPrefixConsumer_Consume(t *testing.T) {
-	pc := NewPrefixConsumer([]string{"/sep", "/foo"})
+	pc := NewPrefixConsumer("/sep", "/foo")
 
 	// Test basic consume
 	matched, separator, remaining, found := pc.Consume("prefix/sep/suffix")
@@ -177,7 +177,7 @@ func TestPrefixConsumer_Consume(t *testing.T) {
 }
 
 func TestPrefixConsumer_Consume_MustBeFollowedBy(t *testing.T) {
-	pc := NewPrefixConsumer([]string{"/sep"})
+	pc := NewPrefixConsumer("/sep")
 	delimiter := func(r rune) bool { return r == '/' }
 
 	// Input: prefix/sep/suffix
@@ -211,7 +211,7 @@ func TestPrefixConsumer_Consume_MustBeFollowedBy(t *testing.T) {
 }
 
 func TestPrefixConsumer_Consume_MustBeAtEnd(t *testing.T) {
-	pc := NewPrefixConsumer([]string{"/sep"})
+	pc := NewPrefixConsumer("/sep")
 
 	// Match at end
 	_, _, _, found := pc.Consume("prefix/sep", consume.MustBeAtEnd(true))
