@@ -136,6 +136,19 @@ func (ps *PrefixConsumer) LongestPrefix(text string) (string, bool) {
 	return match, hasMatch
 }
 
+// Consume scans the input string 'from' to find the longest matching prefix from the configured set.
+// It searches starting from 'StartOffset' (default 0) and returns the first match found.
+// It returns four values:
+// 1. before: The string before the match (or the match itself if Inclusive is true).
+// 2. match: The matched prefix.
+// 3. remaining: The rest of the string after the match (or starting from the match if Inclusive is false).
+// 4. found: True if a match was found, false otherwise.
+// Options:
+// - consume.Inclusive(true): If true, 'before' includes the matched prefix, and 'remaining' starts after it.
+// - consume.StartOffset(n): Starts the search at offset n.
+// - consume.Ignore0PositionMatch(true): Ignores matches at the very start of the search (offset).
+// - consume.MustBeFollowedBy(func(rune) bool): The match must be followed by a rune satisfying the predicate.
+// - consume.MustBeAtEnd(true): The match must be at the end of the string.
 func (ps *PrefixConsumer) Consume(from string, ops ...any) (string, string, string, bool) {
 	inclusive := false
 	startOffset := 0
