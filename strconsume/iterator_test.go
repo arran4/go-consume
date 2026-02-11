@@ -85,16 +85,6 @@ func TestUntilConsumer_Iterator(t *testing.T) {
 			seps:  []string{"/"},
 			input: "a/b/c",
 			ops:   []any{consume.StartOffset(2)}, // Skip "a/"
-			// "a/b/c" at offset 2 is "/b/c". matches "/" at 0?
-			// Wait, consume at offset 2 of "a/b/c" -> "b/c".
-			// matches "/" at 1. matched "b", sep "/", rem "c".
-			// Yield ("a/b", "/")
-			// Wait, Consume returns matched relative to input.
-			// StartOffset=2. Input "a/b/c". Separator "/" found at index 3 (second /).
-			// Matched "a/b".
-			// Separator "/".
-			// Remaining "c".
-			// Next iteration: "c". No separator. Yield ("c", "").
 			expected: []struct {
 				matched string
 				sep     string
@@ -108,11 +98,6 @@ func TestUntilConsumer_Iterator(t *testing.T) {
 			seps:  []string{"/"},
 			input: "/a",
 			ops:   []any{consume.Ignore0PositionMatch(true)},
-			// Matches "/" at 0. Ignored.
-			// Next match? No other "/" in "/a".
-			// So no match found?
-			// Consume returns not found.
-			// Yield ("/a", "").
 			expected: []struct {
 				matched string
 				sep     string
@@ -125,10 +110,6 @@ func TestUntilConsumer_Iterator(t *testing.T) {
 			seps:  []string{"/"},
 			input: "//a",
 			ops:   []any{consume.Ignore0PositionMatch(true)},
-			// Match "/" at 0 ignored.
-			// Match "/" at 1 found.
-			// Matched "/", Separator "/". Remaining "a".
-			// Next iter: "a". No match. Yield "a", "".
 			expected: []struct {
 				matched string
 				sep     string
