@@ -158,6 +158,66 @@ func TestUntilConsumer_Consume(t *testing.T) {
 			expectedRemaining: "bar",
 			expectedOk:        true,
 		},
+		{
+			name:              "ConsumeRemainingIfNotFound - Normal behavior (not found)",
+			seps:              []string{";"},
+			input:             "foobar",
+			ops:               []any{},
+			expectedMatched:   "",
+			expectedSeparator: "",
+			expectedRemaining: "foobar",
+			expectedOk:        false,
+		},
+		{
+			name:              "ConsumeRemainingIfNotFound - Match remaining",
+			seps:              []string{";"},
+			input:             "foobar",
+			ops:               []any{consume.ConsumeRemainingIfNotFound(true)},
+			expectedMatched:   "foobar",
+			expectedSeparator: "",
+			expectedRemaining: "",
+			expectedOk:        true,
+		},
+		{
+			name:              "ConsumeRemainingIfNotFound - Normal behavior (found)",
+			seps:              []string{";"},
+			input:             "foo;bar",
+			ops:               []any{consume.ConsumeRemainingIfNotFound(true)},
+			expectedMatched:   "foo",
+			expectedSeparator: ";",
+			expectedRemaining: ";bar",
+			expectedOk:        true,
+		},
+		{
+			name:              "ConsumeRemainingIfNotFound - Inclusive",
+			seps:              []string{";"},
+			input:             "foobar",
+			ops:               []any{consume.ConsumeRemainingIfNotFound(true), consume.Inclusive(true)},
+			expectedMatched:   "foobar",
+			expectedSeparator: "",
+			expectedRemaining: "",
+			expectedOk:        true,
+		},
+		{
+			name:              "ConsumeRemainingIfNotFound - Empty input",
+			seps:              []string{";"},
+			input:             "",
+			ops:               []any{consume.ConsumeRemainingIfNotFound(true)},
+			expectedMatched:   "",
+			expectedSeparator: "",
+			expectedRemaining: "",
+			expectedOk:        true,
+		},
+		{
+			name:              "ConsumeRemainingIfNotFound - Start offset",
+			seps:              []string{";"},
+			input:             "abc",
+			ops:               []any{consume.StartOffset(1), consume.ConsumeRemainingIfNotFound(true)},
+			expectedMatched:   "abc",
+			expectedSeparator: "",
+			expectedRemaining: "",
+			expectedOk:        true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -176,4 +236,34 @@ func TestUntilConsumer_Consume(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUntilConsumer_Iterator_ConsumeRemainingIfNotFound(t *testing.T) {
+	uc := NewUntilConsumer(";")
+
+	// Iterator with ConsumeRemainingIfNotFound
+	// Should yield parts split by separator, and if the last part has no separator, it should yield it too.
+	// Normal iterator yields (matched, separator).
+	// If no separator found, it yields (from, "").
+
+	iter := uc.Iterator("foo;bar", consume.ConsumeRemainingIfNotFound(true))
+	var results []string
+	iter(func(matched, separator string) bool {
+		results = append(results, matched)
+		return true
+	})
+	// "foo;bar" -> "foo" (sep ";"), remaining "bar"
+	// "bar" -> not found -> "bar" (sep ""), remaining ""
+	// Then loop continues with empty string. Not found (or found as empty).
+	// Iterator yields remainder, which is empty.
+	assert.Equal(t, []string{"foo", "bar", ""}, results)
+
+	// With no separator at all
+	iter = uc.Iterator("foobar", consume.ConsumeRemainingIfNotFound(true))
+	results = nil
+	iter(func(matched, separator string) bool {
+		results = append(results, matched)
+		return true
+	})
+	assert.Equal(t, []string{"foobar", ""}, results)
 }

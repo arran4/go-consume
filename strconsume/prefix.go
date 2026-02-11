@@ -39,12 +39,16 @@ type PrefixConsumer struct {
 // 3. found: True if a prefix was found, false otherwise.
 // Options:
 // - consume.CaseInsensitive(true): Match prefixes case-insensitively.
+// - consume.MustMatchWholeString(true): The prefix must match the entire remaining string.
 func (pc PrefixConsumer) Consume(from string, ops ...any) (string, string, bool) {
 	caseInsensitive := false
+	mustMatchWholeString := false
 	for _, op := range ops {
 		switch v := op.(type) {
 		case consume.CaseInsensitive:
 			caseInsensitive = bool(v)
+		case consume.MustMatchWholeString:
+			mustMatchWholeString = bool(v)
 		}
 	}
 
@@ -54,19 +58,27 @@ func (pc PrefixConsumer) Consume(from string, ops ...any) (string, string, bool)
 		}
 		extract := from[:size]
 
+		match := false
 		// Optimization: if not case insensitive, direct lookup
 		if !caseInsensitive {
 			if _, ok := pc.matchers[size][extract]; ok {
-				return extract, from[size:], true
+				match = true
 			}
-			continue
+		} else {
+			// slower path for case sensitivity
+			for p := range pc.matchers[size] {
+				if strings.EqualFold(extract, p) {
+					match = true
+					break
+				}
+			}
 		}
-
-		// slower path for case sensitivity
-		for p := range pc.matchers[size] {
-			if strings.EqualFold(extract, p) {
-				return extract, from[size:], true
+		if match {
+			remaining := from[size:]
+			if mustMatchWholeString && len(remaining) > 0 {
+				continue
 			}
+			return extract, remaining, true
 		}
 	}
 	return "", from, false

@@ -39,11 +39,18 @@ type UntilConsumer struct {
 // 3. remaining: The rest of the string. If inclusive is true, this starts after the separator. If false, it starts at the separator.
 // 4. found: True if a separator was found, false otherwise.
 // If no separator is found, it returns ("", "", from, false).
+// Options:
+// - consume.Inclusive(true): If true, matched includes the separator, and remaining starts after it.
+// - consume.StartOffset(n): Starts the search at offset n.
+// - consume.Ignore0PositionMatch(true): Ignores matches at the start of the string.
+// - consume.CaseInsensitive(true): Matches separators case-insensitively.
+// - consume.ConsumeRemainingIfNotFound(true): If no separator is found, return the whole string as matched, empty separator, and true.
 func (cu UntilConsumer) Consume(from string, ops ...any) (string, string, string, bool) {
 	inclusive := false
 	startOffset := 0
 	ignore0PositionMatch := false
 	caseInsensitive := false
+	consumeRemainingIfNotFound := false
 	for _, op := range ops {
 		switch v := op.(type) {
 		case consume.Inclusive:
@@ -54,6 +61,8 @@ func (cu UntilConsumer) Consume(from string, ops ...any) (string, string, string
 			ignore0PositionMatch = bool(v)
 		case consume.CaseInsensitive:
 			caseInsensitive = bool(v)
+		case consume.ConsumeRemainingIfNotFound:
+			consumeRemainingIfNotFound = bool(v)
 		}
 	}
 	for i := startOffset; i < len(from); i++ {
@@ -92,6 +101,9 @@ func (cu UntilConsumer) Consume(from string, ops ...any) (string, string, string
 				return matched, separator, from[i:], true
 			}
 		}
+	}
+	if consumeRemainingIfNotFound {
+		return from, "", "", true
 	}
 	return "", "", from, false
 }
@@ -218,10 +230,14 @@ func (cu UntilConsumer) Iterator(from string, ops ...any) func(yield func(string
 				if len(separator) > 0 {
 					from = remaining[len(separator):]
 				} else {
-					if len(from) > 0 {
-						from = from[1:]
+					if len(matched) > 0 {
+						from = remaining
 					} else {
-						return
+						if len(from) > 0 {
+							from = from[1:]
+						} else {
+							return
+						}
 					}
 				}
 			}

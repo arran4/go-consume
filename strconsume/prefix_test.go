@@ -75,6 +75,42 @@ func TestPrefixConsumer_Consume(t *testing.T) {
 			expectedRemaining: "foobar",
 			expectedFound:     false,
 		},
+		{
+			name:              "MustMatchWholeString - Partial match",
+			prefixes:          []string{"foo"},
+			input:             "foobar",
+			ops:               []any{consume.MustMatchWholeString(true)},
+			expectedMatched:   "",
+			expectedRemaining: "foobar",
+			expectedFound:     false,
+		},
+		{
+			name:              "MustMatchWholeString - Full match",
+			prefixes:          []string{"foo"},
+			input:             "foo",
+			ops:               []any{consume.MustMatchWholeString(true)},
+			expectedMatched:   "foo",
+			expectedRemaining: "",
+			expectedFound:     true,
+		},
+		{
+			name:              "MustMatchWholeString - Case insensitive full match",
+			prefixes:          []string{"foo"},
+			input:             "Foo",
+			ops:               []any{consume.MustMatchWholeString(true), consume.CaseInsensitive(true)},
+			expectedMatched:   "Foo",
+			expectedRemaining: "",
+			expectedFound:     true,
+		},
+		{
+			name:              "MustMatchWholeString - Case insensitive partial match",
+			prefixes:          []string{"foo"},
+			input:             "Foobar",
+			ops:               []any{consume.MustMatchWholeString(true), consume.CaseInsensitive(true)},
+			expectedMatched:   "",
+			expectedRemaining: "Foobar",
+			expectedFound:     false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -91,4 +127,31 @@ func TestPrefixConsumer_Consume(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPrefixConsumer_Iterator_MustMatchWholeString(t *testing.T) {
+	pc := NewPrefixConsumer("foo")
+
+	// Iterator with MustMatchWholeString
+	// Should yield only if the whole string matches the prefix.
+	// Since iterator repeatedly consumes, if we match whole string, remaining is empty, so loop terminates.
+
+	iter := pc.Iterator("foo", consume.MustMatchWholeString(true))
+	count := 0
+	iter(func(matched, remaining string) bool {
+		count++
+		assert.Equal(t, "foo", matched)
+		assert.Equal(t, "", remaining)
+		return true
+	})
+	assert.Equal(t, 1, count)
+
+	// If not matching whole string
+	iter = pc.Iterator("foobar", consume.MustMatchWholeString(true))
+	count = 0
+	iter(func(matched, remaining string) bool {
+		count++
+		return true
+	})
+	assert.Equal(t, 0, count)
 }

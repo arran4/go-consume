@@ -4,3 +4,5 @@ type Inclusive bool
 type StartOffset int
 type Ignore0PositionMatch bool
 type CaseInsensitive bool
+type MustMatchWholeString bool
+type ConsumeRemainingIfNotFound bool
