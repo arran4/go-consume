@@ -116,98 +116,110 @@ func TestPrefixConsumer(t *testing.T) {
 func TestPrefixConsumer_Consume(t *testing.T) {
 	pc := NewPrefixConsumer("/sep", "/foo")
 
-	// Test basic consume
-	matched, separator, remaining, found := pc.Consume("prefix/sep/suffix")
-	if !found {
-		t.Errorf("Consume failed to find separator")
-	}
-	if matched != "prefix" {
-		t.Errorf("Consume matched = %q, expected %q", matched, "prefix")
-	}
-	if separator != "/sep" {
-		t.Errorf("Consume separator = %q, expected %q", separator, "/sep")
-	}
-	if remaining != "/sep/suffix" {
-		t.Errorf("Consume remaining = %q, expected %q", remaining, "/sep/suffix")
-	}
+	t.Run("Basic Consume", func(t *testing.T) {
+		matched, separator, remaining, found := pc.Consume("prefix/sep/suffix")
+		if !found {
+			t.Errorf("Consume failed to find separator")
+		}
+		if matched != "prefix" {
+			t.Errorf("Consume matched = %q, expected %q", matched, "prefix")
+		}
+		if separator != "/sep" {
+			t.Errorf("Consume separator = %q, expected %q", separator, "/sep")
+		}
+		if remaining != "/sep/suffix" {
+			t.Errorf("Consume remaining = %q, expected %q", remaining, "/sep/suffix")
+		}
+	})
 
-	// Test Inclusive
-	matched, _, remaining, found = pc.Consume("prefix/sep/suffix", consume.Inclusive(true))
-	if !found {
-		t.Errorf("Consume (inclusive) failed")
-	}
-	if matched != "prefix/sep" {
-		t.Errorf("Consume (inclusive) matched = %q, expected %q", matched, "prefix/sep")
-	}
-	if remaining != "/suffix" {
-		t.Errorf("Consume (inclusive) remaining = %q, expected %q", remaining, "/suffix")
-	}
+	t.Run("Inclusive", func(t *testing.T) {
+		matched, _, remaining, found := pc.Consume("prefix/sep/suffix", consume.Inclusive(true))
+		if !found {
+			t.Errorf("Consume (inclusive) failed")
+		}
+		if matched != "prefix/sep" {
+			t.Errorf("Consume (inclusive) matched = %q, expected %q", matched, "prefix/sep")
+		}
+		if remaining != "/suffix" {
+			t.Errorf("Consume (inclusive) remaining = %q, expected %q", remaining, "/suffix")
+		}
+	})
 
-	// Test StartOffset
-	_, separator, _, found = pc.Consume("prefix/sep/suffix", consume.StartOffset(7))
-	// Offset 7 is after /sep start.
-	if found {
-		t.Errorf("Consume (offset 7) found unexpected match: %s", separator)
-	}
+	t.Run("StartOffset", func(t *testing.T) {
+		_, separator, _, found := pc.Consume("prefix/sep/suffix", consume.StartOffset(7))
+		// Offset 7 is after /sep start.
+		if found {
+			t.Errorf("Consume (offset 7) found unexpected match: %s", separator)
+		}
+	})
 
-	// Test StartOffset matching
-	_, separator, _, found = pc.Consume("prefix/sep/suffix", consume.StartOffset(6))
-	if !found {
-		t.Errorf("Consume (offset 6) failed")
-	}
-	if separator != "/sep" {
-		t.Errorf("Consume (offset 6) separator = %q, expected %q", separator, "/sep")
-	}
+	t.Run("StartOffset matching", func(t *testing.T) {
+		_, separator, _, found := pc.Consume("prefix/sep/suffix", consume.StartOffset(6))
+		if !found {
+			t.Errorf("Consume (offset 6) failed")
+		}
+		if separator != "/sep" {
+			t.Errorf("Consume (offset 6) separator = %q, expected %q", separator, "/sep")
+		}
+	})
 
-	// Test Ignore0PositionMatch
-	_, separator, _, found = pc.Consume("/sep/suffix", consume.Ignore0PositionMatch(true))
-	if found {
-		// Should skip 0 position. No match later (unlike /s matching /suffix).
-		t.Errorf("Consume (Ignore0) found unexpected match: %s", separator)
-	}
+	t.Run("Ignore0PositionMatch", func(t *testing.T) {
+		_, separator, _, found := pc.Consume("/sep/suffix", consume.Ignore0PositionMatch(true))
+		if found {
+			// Should skip 0 position. No match later (unlike /s matching /suffix).
+			t.Errorf("Consume (Ignore0) found unexpected match: %s", separator)
+		}
+	})
 
-	// Test Ignore0PositionMatch with later match
-	matched, _, _, found = pc.Consume("/sep/sep", consume.Ignore0PositionMatch(true))
-	if !found {
-		t.Errorf("Consume (Ignore0 with later) failed")
-	}
-	if matched != "/sep" {
-		t.Errorf("Consume (Ignore0 with later) matched = %q, expected %q", matched, "/sep")
-	}
+	t.Run("Ignore0PositionMatch with later match", func(t *testing.T) {
+		matched, _, _, found := pc.Consume("/sep/sep", consume.Ignore0PositionMatch(true))
+		if !found {
+			t.Errorf("Consume (Ignore0 with later) failed")
+		}
+		if matched != "/sep" {
+			t.Errorf("Consume (Ignore0 with later) matched = %q, expected %q", matched, "/sep")
+		}
+	})
 }
 
 func TestPrefixConsumer_Consume_MustBeFollowedBy(t *testing.T) {
 	pc := NewPrefixConsumer("/sep")
 	delimiter := func(r rune) bool { return r == '/' }
 
-	// Input: prefix/sep/suffix
-	// Match /sep. Next char /. Matches delimiter.
-	_, separator, _, found := pc.Consume("prefix/sep/suffix", consume.MustBeFollowedBy(delimiter))
-	if !found {
-		t.Errorf("Consume failed")
-	}
-	if separator != "/sep" {
-		t.Errorf("Got %q, expected %q", separator, "/sep")
-	}
+	t.Run("Match with delimiter", func(t *testing.T) {
+		// Input: prefix/sep/suffix
+		// Match /sep. Next char /. Matches delimiter.
+		_, separator, _, found := pc.Consume("prefix/sep/suffix", consume.MustBeFollowedBy(delimiter))
+		if !found {
+			t.Errorf("Consume failed")
+		}
+		if separator != "/sep" {
+			t.Errorf("Got %q, expected %q", separator, "/sep")
+		}
+	})
 
-	// Input: prefix/sepSuffix
-	// Match /sep. Next char S. Not delimiter. Should FAIL to match at this position?
-	// But Consume scans.
-	// Is there another match? No.
-	_, separator, _, found = pc.Consume("prefix/sepSuffix", consume.MustBeFollowedBy(delimiter))
-	if found {
-		t.Errorf("Consume found match when not followed by delimiter: %s", separator)
-	}
+	t.Run("Match without delimiter", func(t *testing.T) {
+		// Input: prefix/sepSuffix
+		// Match /sep. Next char S. Not delimiter. Should FAIL to match at this position?
+		// But Consume scans.
+		// Is there another match? No.
+		_, separator, _, found := pc.Consume("prefix/sepSuffix", consume.MustBeFollowedBy(delimiter))
+		if found {
+			t.Errorf("Consume found match when not followed by delimiter: %s", separator)
+		}
+	})
 
-	// Input: prefix/sep
-	// Match /sep. Next char EOF. Should pass.
-	_, separator, _, found = pc.Consume("prefix/sep", consume.MustBeFollowedBy(delimiter))
-	if !found {
-		t.Errorf("Consume failed at EOF")
-	}
-	if separator != "/sep" {
-		t.Errorf("Got %q, expected %q", separator, "/sep")
-	}
+	t.Run("Match at EOF", func(t *testing.T) {
+		// Input: prefix/sep
+		// Match /sep. Next char EOF. Should pass.
+		_, separator, _, found := pc.Consume("prefix/sep", consume.MustBeFollowedBy(delimiter))
+		if !found {
+			t.Errorf("Consume failed at EOF")
+		}
+		if separator != "/sep" {
+			t.Errorf("Got %q, expected %q", separator, "/sep")
+		}
+	})
 }
 
 func TestPrefixConsumer_Consume_MustBeAtEnd(t *testing.T) {
