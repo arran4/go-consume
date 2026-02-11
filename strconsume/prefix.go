@@ -118,3 +118,28 @@ func (pc PrefixConsumer) SplitFunc(ops ...any) bufio.SplitFunc {
 		return 0, nil, nil
 	}
 }
+
+// Iterator provides a func(yield func(string, string) bool) iterator pattern.
+// It iterates over the input string, repeatedly consuming prefixes.
+// The yielded values are (matched, remaining).
+// The iteration stops when no prefix matches. The unmatched remainder is NOT yielded.
+// Options:
+// - consume.CaseInsensitive(true): Match prefixes case-insensitively.
+func (pc PrefixConsumer) Iterator(from string, ops ...any) func(yield func(string, string) bool) {
+	return func(yield func(string, string) bool) {
+		for {
+			matched, remaining, found := pc.Consume(from, ops...)
+			if !found {
+				return
+			}
+			if !yield(matched, remaining) {
+				return
+			}
+			// Avoid infinite loop if prefix is empty
+			if len(matched) == 0 {
+				return
+			}
+			from = remaining
+		}
+	}
+}

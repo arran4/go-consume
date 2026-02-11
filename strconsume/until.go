@@ -163,3 +163,68 @@ func (cu UntilConsumer) SplitFunc(ops ...any) bufio.SplitFunc {
 		return 0, nil, nil
 	}
 }
+
+// Iterator provides a func(yield func(string, string) bool) iterator pattern.
+// It iterates over the input string, splitting it by the configured separators.
+// The yielded values are (matched, separator).
+// The last yielded value will be the remaining string with an empty separator, unless the input was fully consumed by separators (e.g. empty string or ends with separator, but Wait: strings.Split yields empty string at end if string ends with separator).
+// Options:
+// - consume.Inclusive(true): If true, matched includes the separator, and remaining starts after it.
+// - consume.StartOffset(n): Starts the first search at offset n. Subsequent searches start from the beginning of the remaining string.
+// - consume.Ignore0PositionMatch(true): Ignores matches at the start of the string (for each iteration step).
+// - consume.CaseInsensitive(true): Matches separators case-insensitively.
+func (cu UntilConsumer) Iterator(from string, ops ...any) func(yield func(string, string) bool) {
+	return func(yield func(string, string) bool) {
+		inclusive := false
+
+		var loopOps []any
+		firstRun := true
+
+		for _, op := range ops {
+			switch v := op.(type) {
+			case consume.Inclusive:
+				inclusive = bool(v)
+				loopOps = append(loopOps, op)
+			case consume.StartOffset:
+				// StartOffset only applies to the first run, so we don't add it to loopOps
+			default:
+				loopOps = append(loopOps, op)
+			}
+		}
+
+		for {
+			var currentOps []any
+			if firstRun {
+				currentOps = ops
+			} else {
+				currentOps = loopOps
+			}
+
+			matched, separator, remaining, found := cu.Consume(from, currentOps...)
+			firstRun = false
+
+			if !found {
+				yield(from, "")
+				return
+			}
+
+			if !yield(matched, separator) {
+				return
+			}
+
+			if inclusive {
+				from = remaining
+			} else {
+				if len(separator) > 0 {
+					from = remaining[len(separator):]
+				} else {
+					if len(from) > 0 {
+						from = from[1:]
+					} else {
+						return
+					}
+				}
+			}
+		}
+	}
+}
