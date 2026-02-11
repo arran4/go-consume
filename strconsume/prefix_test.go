@@ -1,8 +1,8 @@
 package strconsume
 
 import (
-	"testing"
 	"github.com/arran4/go-consume"
+	"testing"
 )
 
 func TestPrefixConsumer(t *testing.T) {
@@ -132,7 +132,7 @@ func TestPrefixConsumer_Consume(t *testing.T) {
 	}
 
 	// Test Inclusive
-	matched, separator, remaining, found = pc.Consume("prefix/sep/suffix", consume.Inclusive(true))
+	matched, _, remaining, found = pc.Consume("prefix/sep/suffix", consume.Inclusive(true))
 	if !found {
 		t.Errorf("Consume (inclusive) failed")
 	}
@@ -144,14 +144,14 @@ func TestPrefixConsumer_Consume(t *testing.T) {
 	}
 
 	// Test StartOffset
-	matched, separator, remaining, found = pc.Consume("prefix/sep/suffix", consume.StartOffset(7))
+	_, separator, _, found = pc.Consume("prefix/sep/suffix", consume.StartOffset(7))
 	// Offset 7 is after /sep start.
 	if found {
 		t.Errorf("Consume (offset 7) found unexpected match: %s", separator)
 	}
 
 	// Test StartOffset matching
-	matched, separator, remaining, found = pc.Consume("prefix/sep/suffix", consume.StartOffset(6))
+	_, separator, _, found = pc.Consume("prefix/sep/suffix", consume.StartOffset(6))
 	if !found {
 		t.Errorf("Consume (offset 6) failed")
 	}
@@ -160,14 +160,14 @@ func TestPrefixConsumer_Consume(t *testing.T) {
 	}
 
 	// Test Ignore0PositionMatch
-	matched, separator, remaining, found = pc.Consume("/sep/suffix", consume.Ignore0PositionMatch(true))
+	_, separator, _, found = pc.Consume("/sep/suffix", consume.Ignore0PositionMatch(true))
 	if found {
 		// Should skip 0 position. No match later (unlike /s matching /suffix).
 		t.Errorf("Consume (Ignore0) found unexpected match: %s", separator)
 	}
 
 	// Test Ignore0PositionMatch with later match
-	matched, separator, remaining, found = pc.Consume("/sep/sep", consume.Ignore0PositionMatch(true))
+	matched, _, _, found = pc.Consume("/sep/sep", consume.Ignore0PositionMatch(true))
 	if !found {
 		t.Errorf("Consume (Ignore0 with later) failed")
 	}

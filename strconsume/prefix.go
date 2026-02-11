@@ -1,9 +1,9 @@
 package strconsume
 
 import (
+	"bufio"
 	"slices"
 	"unicode/utf8"
-	"bufio"
 
 	"github.com/arran4/go-consume"
 )

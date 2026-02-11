@@ -61,13 +61,13 @@ func runPrefixConsumerBenchmark(b *testing.B, fn func(*PrefixConsumer, string)) 
 		inputs := make([]string, 1000)
 		for i := 0; i < 1000; i++ {
 			// Pick a path and append something
-			base := paths[i % len(paths)]
+			base := paths[i%len(paths)]
 			inputs[i] = base + "/suffix"
 		}
 
 		b.Run(fmt.Sprintf("Size_%d_Hit", size), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				fn(ps, inputs[i % len(inputs)])
+				fn(ps, inputs[i%len(inputs)])
 			}
 		})
 
@@ -78,7 +78,7 @@ func runPrefixConsumerBenchmark(b *testing.B, fn func(*PrefixConsumer, string)) 
 		}
 		b.Run(fmt.Sprintf("Size_%d_Miss", size), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				fn(ps, missInputs[i % len(missInputs)])
+				fn(ps, missInputs[i%len(missInputs)])
 			}
 		})
 	}
@@ -138,13 +138,13 @@ func BenchmarkMapSearch_Find(b *testing.B) {
 
 		inputs := make([]string, 1000)
 		for i := 0; i < 1000; i++ {
-			base := paths[i % len(paths)]
+			base := paths[i%len(paths)]
 			inputs[i] = base + "/suffix"
 		}
 
 		b.Run(fmt.Sprintf("Size_%d_Hit", size), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				ms.Find(inputs[i % len(inputs)])
+				ms.Find(inputs[i%len(inputs)])
 			}
 		})
 	}
