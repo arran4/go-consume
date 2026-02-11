@@ -158,6 +158,66 @@ func TestUntilConsumer_Consume(t *testing.T) {
 			expectedRemaining: "bar",
 			expectedOk:        true,
 		},
+		{
+			name:              "ConsumeRemainingIfNotFound - Normal behavior (not found)",
+			seps:              []string{";"},
+			input:             "foobar",
+			ops:               []any{},
+			expectedMatched:   "",
+			expectedSeparator: "",
+			expectedRemaining: "foobar",
+			expectedOk:        false,
+		},
+		{
+			name:              "ConsumeRemainingIfNotFound - Match remaining",
+			seps:              []string{";"},
+			input:             "foobar",
+			ops:               []any{consume.ConsumeRemainingIfNotFound(true)},
+			expectedMatched:   "foobar",
+			expectedSeparator: "",
+			expectedRemaining: "",
+			expectedOk:        true,
+		},
+		{
+			name:              "ConsumeRemainingIfNotFound - Normal behavior (found)",
+			seps:              []string{";"},
+			input:             "foo;bar",
+			ops:               []any{consume.ConsumeRemainingIfNotFound(true)},
+			expectedMatched:   "foo",
+			expectedSeparator: ";",
+			expectedRemaining: ";bar",
+			expectedOk:        true,
+		},
+		{
+			name:              "ConsumeRemainingIfNotFound - Inclusive",
+			seps:              []string{";"},
+			input:             "foobar",
+			ops:               []any{consume.ConsumeRemainingIfNotFound(true), consume.Inclusive(true)},
+			expectedMatched:   "foobar",
+			expectedSeparator: "",
+			expectedRemaining: "",
+			expectedOk:        true,
+		},
+		{
+			name:              "ConsumeRemainingIfNotFound - Empty input",
+			seps:              []string{";"},
+			input:             "",
+			ops:               []any{consume.ConsumeRemainingIfNotFound(true)},
+			expectedMatched:   "",
+			expectedSeparator: "",
+			expectedRemaining: "",
+			expectedOk:        true,
+		},
+		{
+			name:              "ConsumeRemainingIfNotFound - Start offset",
+			seps:              []string{";"},
+			input:             "abc",
+			ops:               []any{consume.StartOffset(1), consume.ConsumeRemainingIfNotFound(true)},
+			expectedMatched:   "abc",
+			expectedSeparator: "",
+			expectedRemaining: "",
+			expectedOk:        true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -176,44 +236,6 @@ func TestUntilConsumer_Consume(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestUntilConsumer_ConsumeRemainingIfNotFound(t *testing.T) {
-	uc := NewUntilConsumer(";")
-
-	// Normal behavior: Not found
-	matched, separator, remaining, found := uc.Consume("foobar")
-	assert.False(t, found)
-	assert.Equal(t, "", matched)
-	assert.Equal(t, "", separator)
-	assert.Equal(t, "foobar", remaining)
-
-	// With ConsumeRemainingIfNotFound
-	matched, separator, remaining, found = uc.Consume("foobar", consume.ConsumeRemainingIfNotFound(true))
-	assert.True(t, found)
-	assert.Equal(t, "foobar", matched)
-	assert.Equal(t, "", separator)
-	assert.Equal(t, "", remaining)
-
-	// Normal behavior: Found
-	matched, separator, remaining, found = uc.Consume("foo;bar", consume.ConsumeRemainingIfNotFound(true))
-	assert.True(t, found)
-	assert.Equal(t, "foo", matched)
-	assert.Equal(t, ";", separator)
-	assert.Equal(t, ";bar", remaining)
-}
-
-func TestUntilConsumer_ConsumeRemainingIfNotFound_Inclusive(t *testing.T) {
-	uc := NewUntilConsumer(";")
-
-	// With ConsumeRemainingIfNotFound and Inclusive
-	// Inclusive usually includes separator in matched, and remaining starts after it.
-	// If no separator found, inclusive doesn't change much as there is no separator.
-	matched, separator, remaining, found := uc.Consume("foobar", consume.ConsumeRemainingIfNotFound(true), consume.Inclusive(true))
-	assert.True(t, found)
-	assert.Equal(t, "foobar", matched)
-	assert.Equal(t, "", separator)
-	assert.Equal(t, "", remaining)
 }
 
 func TestUntilConsumer_Iterator_ConsumeRemainingIfNotFound(t *testing.T) {
@@ -244,27 +266,4 @@ func TestUntilConsumer_Iterator_ConsumeRemainingIfNotFound(t *testing.T) {
 		return true
 	})
 	assert.Equal(t, []string{"foobar", ""}, results)
-}
-
-func TestUntilConsumer_ConsumeRemainingIfNotFound_EmptyInput(t *testing.T) {
-	uc := NewUntilConsumer(";")
-
-	// Empty input
-	matched, separator, remaining, found := uc.Consume("", consume.ConsumeRemainingIfNotFound(true))
-	assert.True(t, found)
-	assert.Equal(t, "", matched)
-	assert.Equal(t, "", separator)
-	assert.Equal(t, "", remaining)
-}
-
-func TestUntilConsumer_ConsumeRemainingIfNotFound_StartOffset(t *testing.T) {
-	uc := NewUntilConsumer(";")
-
-	// StartOffset skips part of string scan. But if not found, we return whole string?
-	// Based on code logic, yes.
-	matched, separator, remaining, found := uc.Consume("abc", consume.StartOffset(1), consume.ConsumeRemainingIfNotFound(true))
-	assert.True(t, found)
-	assert.Equal(t, "abc", matched)
-	assert.Equal(t, "", separator)
-	assert.Equal(t, "", remaining)
 }

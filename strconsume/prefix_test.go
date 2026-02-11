@@ -75,6 +75,42 @@ func TestPrefixConsumer_Consume(t *testing.T) {
 			expectedRemaining: "foobar",
 			expectedFound:     false,
 		},
+		{
+			name:              "MustMatchWholeString - Partial match",
+			prefixes:          []string{"foo"},
+			input:             "foobar",
+			ops:               []any{consume.MustMatchWholeString(true)},
+			expectedMatched:   "",
+			expectedRemaining: "foobar",
+			expectedFound:     false,
+		},
+		{
+			name:              "MustMatchWholeString - Full match",
+			prefixes:          []string{"foo"},
+			input:             "foo",
+			ops:               []any{consume.MustMatchWholeString(true)},
+			expectedMatched:   "foo",
+			expectedRemaining: "",
+			expectedFound:     true,
+		},
+		{
+			name:              "MustMatchWholeString - Case insensitive full match",
+			prefixes:          []string{"foo"},
+			input:             "Foo",
+			ops:               []any{consume.MustMatchWholeString(true), consume.CaseInsensitive(true)},
+			expectedMatched:   "Foo",
+			expectedRemaining: "",
+			expectedFound:     true,
+		},
+		{
+			name:              "MustMatchWholeString - Case insensitive partial match",
+			prefixes:          []string{"foo"},
+			input:             "Foobar",
+			ops:               []any{consume.MustMatchWholeString(true), consume.CaseInsensitive(true)},
+			expectedMatched:   "",
+			expectedRemaining: "Foobar",
+			expectedFound:     false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -91,42 +127,6 @@ func TestPrefixConsumer_Consume(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestPrefixConsumer_MustMatchWholeString(t *testing.T) {
-	pc := NewPrefixConsumer("foo")
-
-	// Normal behavior
-	matched, remaining, found := pc.Consume("foobar")
-	assert.True(t, found)
-	assert.Equal(t, "foo", matched)
-	assert.Equal(t, "bar", remaining)
-
-	// With MustMatchWholeString
-	matched, remaining, found = pc.Consume("foobar", consume.MustMatchWholeString(true))
-	assert.False(t, found)
-	assert.Equal(t, "", matched)
-	assert.Equal(t, "foobar", remaining)
-
-	matched, remaining, found = pc.Consume("foo", consume.MustMatchWholeString(true))
-	assert.True(t, found)
-	assert.Equal(t, "foo", matched)
-	assert.Equal(t, "", remaining)
-}
-
-func TestPrefixConsumer_MustMatchWholeString_CaseInsensitive(t *testing.T) {
-	pc := NewPrefixConsumer("foo")
-
-	// With MustMatchWholeString and CaseInsensitive
-	matched, remaining, found := pc.Consume("Foo", consume.MustMatchWholeString(true), consume.CaseInsensitive(true))
-	assert.True(t, found)
-	assert.Equal(t, "Foo", matched) // Preserves case of input
-	assert.Equal(t, "", remaining)
-
-	matched, remaining, found = pc.Consume("Foobar", consume.MustMatchWholeString(true), consume.CaseInsensitive(true))
-	assert.False(t, found)
-	assert.Equal(t, "", matched)
-	assert.Equal(t, "Foobar", remaining)
 }
 
 func TestPrefixConsumer_Iterator_MustMatchWholeString(t *testing.T) {
