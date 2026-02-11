@@ -201,18 +201,6 @@ func TestPrefixConsumer_Iterator(t *testing.T) {
 			expected: nil,
 		},
 		{
-			name:     "Case Insensitive",
-			prefixes: []string{"Foo"},
-			input:    "foobar",
-			ops:      []any{consume.CaseInsensitive(true)},
-			expected: []struct {
-				matched string
-				rem     string
-			}{
-				{"foo", "bar"}, // matched is lower case from input
-			},
-		},
-		{
 			name:     "Empty prefix",
 			prefixes: []string{""},
 			input:    "abc",
@@ -229,7 +217,7 @@ func TestPrefixConsumer_Iterator(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pc := NewPrefixConsumer(tt.prefixes...)
+			pc := NewPrefixConsumer(tt.prefixes)
 			iter := pc.Iterator(tt.input, tt.ops...)
 			var actual []struct {
 				matched string

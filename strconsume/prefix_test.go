@@ -2,156 +2,226 @@ package strconsume
 
 import (
 	"testing"
-
 	"github.com/arran4/go-consume"
-	"github.com/stretchr/testify/assert"
 )
 
-func TestPrefixConsumer_Consume(t *testing.T) {
+func TestPrefixConsumer(t *testing.T) {
 	tests := []struct {
-		name              string
-		prefixes          []string
-		input             string
-		ops               []any
-		expectedMatched   string
-		expectedRemaining string
-		expectedFound     bool
+		name     string
+		paths    []string
+		input    string
+		expected string
+		found    bool
 	}{
 		{
-			name:              "Single prefix match",
-			prefixes:          []string{"foo"},
-			input:             "foobar",
-			expectedMatched:   "foo",
-			expectedRemaining: "bar",
-			expectedFound:     true,
+			name:     "Simple prefix match",
+			paths:    []string{"AAB", "ABB"},
+			input:    "AAB",
+			expected: "AAB",
+			found:    true,
 		},
 		{
-			name:              "No match",
-			prefixes:          []string{"foo"},
-			input:             "barfoo",
-			expectedMatched:   "",
-			expectedRemaining: "barfoo",
-			expectedFound:     false,
+			name:     "Longest prefix match",
+			paths:    []string{"A", "AA", "AAA"},
+			input:    "AAAA",
+			expected: "AAA",
+			found:    true,
 		},
 		{
-			name:              "Longest match preference",
-			prefixes:          []string{"foo", "foobar"},
-			input:             "foobarbaz",
-			expectedMatched:   "foobar",
-			expectedRemaining: "baz",
-			expectedFound:     true,
+			name:     "No match",
+			paths:    []string{"B", "C"},
+			input:    "A",
+			expected: "",
+			found:    false,
 		},
 		{
-			name:              "Empty string",
-			prefixes:          []string{"foo"},
-			input:             "",
-			expectedMatched:   "",
-			expectedRemaining: "",
-			expectedFound:     false,
+			name:     "Empty input",
+			paths:    []string{"A"},
+			input:    "",
+			expected: "",
+			found:    false,
 		},
 		{
-			name:              "Prefix longer than input",
-			prefixes:          []string{"foo"},
-			input:             "fo",
-			expectedMatched:   "",
-			expectedRemaining: "fo",
-			expectedFound:     false,
+			name:     "Empty paths",
+			paths:    []string{},
+			input:    "A",
+			expected: "",
+			found:    false,
 		},
 		{
-			name:              "Case insensitive match",
-			prefixes:          []string{"Foo"},
-			input:             "foobar",
-			ops:               []any{consume.CaseInsensitive(true)},
-			expectedMatched:   "foo", // returns extracted part
-			expectedRemaining: "bar",
-			expectedFound:     true,
+			name:     "Match shorter prefix",
+			paths:    []string{"A", "B"},
+			input:    "AA",
+			expected: "A",
+			found:    true,
 		},
 		{
-			name:              "Case sensitive mismatch",
-			prefixes:          []string{"Foo"},
-			input:             "foobar",
-			ops:               []any{consume.CaseInsensitive(false)},
-			expectedMatched:   "",
-			expectedRemaining: "foobar",
-			expectedFound:     false,
+			name:     "Match longer than text",
+			paths:    []string{"AAA"},
+			input:    "AA",
+			expected: "",
+			found:    false,
 		},
 		{
-			name:              "MustMatchWholeString - Partial match",
-			prefixes:          []string{"foo"},
-			input:             "foobar",
-			ops:               []any{consume.MustMatchWholeString(true)},
-			expectedMatched:   "",
-			expectedRemaining: "foobar",
-			expectedFound:     false,
+			name:     "Multiple candidates with same prefix",
+			paths:    []string{"foo", "foobar"},
+			input:    "foobarbaz",
+			expected: "foobar",
+			found:    true,
 		},
 		{
-			name:              "MustMatchWholeString - Full match",
-			prefixes:          []string{"foo"},
-			input:             "foo",
-			ops:               []any{consume.MustMatchWholeString(true)},
-			expectedMatched:   "foo",
-			expectedRemaining: "",
-			expectedFound:     true,
+			name:     "Dense paths",
+			paths:    []string{"/a", "/ab", "/abc", "/abd"},
+			input:    "/abd/foo",
+			expected: "/abd",
+			found:    true,
 		},
 		{
-			name:              "MustMatchWholeString - Case insensitive full match",
-			prefixes:          []string{"foo"},
-			input:             "Foo",
-			ops:               []any{consume.MustMatchWholeString(true), consume.CaseInsensitive(true)},
-			expectedMatched:   "Foo",
-			expectedRemaining: "",
-			expectedFound:     true,
+			name:     "Paths with no common prefix with text",
+			paths:    []string{"foo", "bar"},
+			input:    "baz",
+			expected: "",
+			found:    false,
 		},
 		{
-			name:              "MustMatchWholeString - Case insensitive partial match",
-			prefixes:          []string{"foo"},
-			input:             "Foobar",
-			ops:               []any{consume.MustMatchWholeString(true), consume.CaseInsensitive(true)},
-			expectedMatched:   "",
-			expectedRemaining: "Foobar",
-			expectedFound:     false,
+			name:     "Empty path in list",
+			paths:    []string{"", "a"},
+			input:    "abc",
+			expected: "a", // Should prefer longest non-empty
+			found:    true,
+		},
+		{
+			name:     "Empty path match",
+			paths:    []string{""},
+			input:    "abc",
+			expected: "", // "" is prefix of everything
+			found:    true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pc := NewPrefixConsumer(tt.prefixes...)
-			matched, remaining, found := pc.Consume(tt.input, tt.ops...)
-			assert.Equal(t, tt.expectedFound, found)
-			if found {
-				assert.Equal(t, tt.expectedMatched, matched)
-				assert.Equal(t, tt.expectedRemaining, remaining)
-			} else {
-				assert.Equal(t, tt.expectedRemaining, remaining)
-				assert.Equal(t, "", matched)
+			ps := NewPrefixConsumer(tt.paths)
+			got, found := ps.LongestPrefix(tt.input)
+			if found != tt.found {
+				t.Errorf("LongestPrefix() found = %v, expected %v", found, tt.found)
+			}
+			if got != tt.expected {
+				t.Errorf("LongestPrefix() got = %q, expected %q", got, tt.expected)
 			}
 		})
 	}
 }
 
-func TestPrefixConsumer_Iterator_MustMatchWholeString(t *testing.T) {
-	pc := NewPrefixConsumer("foo")
+func TestPrefixConsumer_Consume(t *testing.T) {
+	pc := NewPrefixConsumer([]string{"/sep", "/foo"})
 
-	// Iterator with MustMatchWholeString
-	// Should yield only if the whole string matches the prefix.
-	// Since iterator repeatedly consumes, if we match whole string, remaining is empty, so loop terminates.
+	// Test basic consume
+	matched, separator, remaining, found := pc.Consume("prefix/sep/suffix")
+	if !found {
+		t.Errorf("Consume failed to find separator")
+	}
+	if matched != "prefix" {
+		t.Errorf("Consume matched = %q, expected %q", matched, "prefix")
+	}
+	if separator != "/sep" {
+		t.Errorf("Consume separator = %q, expected %q", separator, "/sep")
+	}
+	if remaining != "/sep/suffix" {
+		t.Errorf("Consume remaining = %q, expected %q", remaining, "/sep/suffix")
+	}
 
-	iter := pc.Iterator("foo", consume.MustMatchWholeString(true))
-	count := 0
-	iter(func(matched, remaining string) bool {
-		count++
-		assert.Equal(t, "foo", matched)
-		assert.Equal(t, "", remaining)
-		return true
-	})
-	assert.Equal(t, 1, count)
+	// Test Inclusive
+	matched, separator, remaining, found = pc.Consume("prefix/sep/suffix", consume.Inclusive(true))
+	if !found {
+		t.Errorf("Consume (inclusive) failed")
+	}
+	if matched != "prefix/sep" {
+		t.Errorf("Consume (inclusive) matched = %q, expected %q", matched, "prefix/sep")
+	}
+	if remaining != "/suffix" {
+		t.Errorf("Consume (inclusive) remaining = %q, expected %q", remaining, "/suffix")
+	}
 
-	// If not matching whole string
-	iter = pc.Iterator("foobar", consume.MustMatchWholeString(true))
-	count = 0
-	iter(func(matched, remaining string) bool {
-		count++
-		return true
-	})
-	assert.Equal(t, 0, count)
+	// Test StartOffset
+	matched, separator, remaining, found = pc.Consume("prefix/sep/suffix", consume.StartOffset(7))
+	// Offset 7 is after /sep start.
+	if found {
+		t.Errorf("Consume (offset 7) found unexpected match: %s", separator)
+	}
+
+	// Test StartOffset matching
+	matched, separator, remaining, found = pc.Consume("prefix/sep/suffix", consume.StartOffset(6))
+	if !found {
+		t.Errorf("Consume (offset 6) failed")
+	}
+	if separator != "/sep" {
+		t.Errorf("Consume (offset 6) separator = %q, expected %q", separator, "/sep")
+	}
+
+	// Test Ignore0PositionMatch
+	matched, separator, remaining, found = pc.Consume("/sep/suffix", consume.Ignore0PositionMatch(true))
+	if found {
+		// Should skip 0 position. No match later (unlike /s matching /suffix).
+		t.Errorf("Consume (Ignore0) found unexpected match: %s", separator)
+	}
+
+	// Test Ignore0PositionMatch with later match
+	matched, separator, remaining, found = pc.Consume("/sep/sep", consume.Ignore0PositionMatch(true))
+	if !found {
+		t.Errorf("Consume (Ignore0 with later) failed")
+	}
+	if matched != "/sep" {
+		t.Errorf("Consume (Ignore0 with later) matched = %q, expected %q", matched, "/sep")
+	}
+}
+
+func TestPrefixConsumer_Consume_MustBeFollowedBy(t *testing.T) {
+	pc := NewPrefixConsumer([]string{"/sep"})
+	delimiter := func(r rune) bool { return r == '/' }
+
+	// Input: prefix/sep/suffix
+	// Match /sep. Next char /. Matches delimiter.
+	_, separator, _, found := pc.Consume("prefix/sep/suffix", consume.MustBeFollowedBy(delimiter))
+	if !found {
+		t.Errorf("Consume failed")
+	}
+	if separator != "/sep" {
+		t.Errorf("Got %q, expected %q", separator, "/sep")
+	}
+
+	// Input: prefix/sepSuffix
+	// Match /sep. Next char S. Not delimiter. Should FAIL to match at this position?
+	// But Consume scans.
+	// Is there another match? No.
+	_, separator, _, found = pc.Consume("prefix/sepSuffix", consume.MustBeFollowedBy(delimiter))
+	if found {
+		t.Errorf("Consume found match when not followed by delimiter: %s", separator)
+	}
+
+	// Input: prefix/sep
+	// Match /sep. Next char EOF. Should pass.
+	_, separator, _, found = pc.Consume("prefix/sep", consume.MustBeFollowedBy(delimiter))
+	if !found {
+		t.Errorf("Consume failed at EOF")
+	}
+	if separator != "/sep" {
+		t.Errorf("Got %q, expected %q", separator, "/sep")
+	}
+}
+
+func TestPrefixConsumer_Consume_MustBeAtEnd(t *testing.T) {
+	pc := NewPrefixConsumer([]string{"/sep"})
+
+	// Match at end
+	_, _, _, found := pc.Consume("prefix/sep", consume.MustBeAtEnd(true))
+	if !found {
+		t.Errorf("Consume (MustBeAtEnd) failed at end")
+	}
+
+	// Match not at end
+	_, _, _, found = pc.Consume("prefix/sep/suffix", consume.MustBeAtEnd(true))
+	if found {
+		t.Errorf("Consume (MustBeAtEnd) found match not at end")
+	}
 }

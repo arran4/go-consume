@@ -10,7 +10,7 @@ import (
 )
 
 func ExamplePrefixConsumer_SplitFunc() {
-	pc := strconsume.NewPrefixConsumer("foo", "bar")
+	pc := strconsume.NewPrefixConsumer([]string{"foo", "bar"})
 	input := "foobarfoo"
 	scanner := bufio.NewScanner(strings.NewReader(input))
 	scanner.Split(pc.SplitFunc())
