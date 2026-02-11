@@ -177,3 +177,94 @@ func TestUntilConsumer_Consume(t *testing.T) {
 		})
 	}
 }
+
+func TestUntilConsumer_ConsumeRemainingIfNotFound(t *testing.T) {
+	uc := NewUntilConsumer(";")
+
+	// Normal behavior: Not found
+	matched, separator, remaining, found := uc.Consume("foobar")
+	assert.False(t, found)
+	assert.Equal(t, "", matched)
+	assert.Equal(t, "", separator)
+	assert.Equal(t, "foobar", remaining)
+
+	// With ConsumeRemainingIfNotFound
+	matched, separator, remaining, found = uc.Consume("foobar", consume.ConsumeRemainingIfNotFound(true))
+	assert.True(t, found)
+	assert.Equal(t, "foobar", matched)
+	assert.Equal(t, "", separator)
+	assert.Equal(t, "", remaining)
+
+	// Normal behavior: Found
+	matched, separator, remaining, found = uc.Consume("foo;bar", consume.ConsumeRemainingIfNotFound(true))
+	assert.True(t, found)
+	assert.Equal(t, "foo", matched)
+	assert.Equal(t, ";", separator)
+	assert.Equal(t, ";bar", remaining)
+}
+
+func TestUntilConsumer_ConsumeRemainingIfNotFound_Inclusive(t *testing.T) {
+	uc := NewUntilConsumer(";")
+
+	// With ConsumeRemainingIfNotFound and Inclusive
+	// Inclusive usually includes separator in matched, and remaining starts after it.
+	// If no separator found, inclusive doesn't change much as there is no separator.
+	matched, separator, remaining, found := uc.Consume("foobar", consume.ConsumeRemainingIfNotFound(true), consume.Inclusive(true))
+	assert.True(t, found)
+	assert.Equal(t, "foobar", matched)
+	assert.Equal(t, "", separator)
+	assert.Equal(t, "", remaining)
+}
+
+func TestUntilConsumer_Iterator_ConsumeRemainingIfNotFound(t *testing.T) {
+	uc := NewUntilConsumer(";")
+
+	// Iterator with ConsumeRemainingIfNotFound
+	// Should yield parts split by separator, and if the last part has no separator, it should yield it too.
+	// Normal iterator yields (matched, separator).
+	// If no separator found, it yields (from, "").
+
+	iter := uc.Iterator("foo;bar", consume.ConsumeRemainingIfNotFound(true))
+	var results []string
+	iter(func(matched, separator string) bool {
+		results = append(results, matched)
+		return true
+	})
+	// "foo;bar" -> "foo" (sep ";"), remaining "bar"
+	// "bar" -> not found -> "bar" (sep ""), remaining ""
+	// Then loop continues with empty string. Not found (or found as empty).
+	// Iterator yields remainder, which is empty.
+	assert.Equal(t, []string{"foo", "bar", ""}, results)
+
+	// With no separator at all
+	iter = uc.Iterator("foobar", consume.ConsumeRemainingIfNotFound(true))
+	results = nil
+	iter(func(matched, separator string) bool {
+		results = append(results, matched)
+		return true
+	})
+	assert.Equal(t, []string{"foobar", ""}, results)
+}
+
+func TestUntilConsumer_ConsumeRemainingIfNotFound_EmptyInput(t *testing.T) {
+	uc := NewUntilConsumer(";")
+
+	// Empty input
+	matched, separator, remaining, found := uc.Consume("", consume.ConsumeRemainingIfNotFound(true))
+	assert.True(t, found)
+	assert.Equal(t, "", matched)
+	assert.Equal(t, "", separator)
+	assert.Equal(t, "", remaining)
+}
+
+func TestUntilConsumer_ConsumeRemainingIfNotFound_StartOffset(t *testing.T) {
+	uc := NewUntilConsumer(";")
+
+	// StartOffset skips part of string scan. But if not found, we return whole string?
+	// Based on code logic, yes.
+	matched, separator, remaining, found := uc.Consume("abc", consume.StartOffset(1), consume.ConsumeRemainingIfNotFound(true))
+	assert.True(t, found)
+	assert.Equal(t, "abc", matched)
+	assert.Equal(t, "", separator)
+	assert.Equal(t, "", remaining)
+}

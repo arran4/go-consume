@@ -92,3 +92,66 @@ func TestPrefixConsumer_Consume(t *testing.T) {
 		})
 	}
 }
+
+func TestPrefixConsumer_MustMatchWholeString(t *testing.T) {
+	pc := NewPrefixConsumer("foo")
+
+	// Normal behavior
+	matched, remaining, found := pc.Consume("foobar")
+	assert.True(t, found)
+	assert.Equal(t, "foo", matched)
+	assert.Equal(t, "bar", remaining)
+
+	// With MustMatchWholeString
+	matched, remaining, found = pc.Consume("foobar", consume.MustMatchWholeString(true))
+	assert.False(t, found)
+	assert.Equal(t, "", matched)
+	assert.Equal(t, "foobar", remaining)
+
+	matched, remaining, found = pc.Consume("foo", consume.MustMatchWholeString(true))
+	assert.True(t, found)
+	assert.Equal(t, "foo", matched)
+	assert.Equal(t, "", remaining)
+}
+
+func TestPrefixConsumer_MustMatchWholeString_CaseInsensitive(t *testing.T) {
+	pc := NewPrefixConsumer("foo")
+
+	// With MustMatchWholeString and CaseInsensitive
+	matched, remaining, found := pc.Consume("Foo", consume.MustMatchWholeString(true), consume.CaseInsensitive(true))
+	assert.True(t, found)
+	assert.Equal(t, "Foo", matched) // Preserves case of input
+	assert.Equal(t, "", remaining)
+
+	matched, remaining, found = pc.Consume("Foobar", consume.MustMatchWholeString(true), consume.CaseInsensitive(true))
+	assert.False(t, found)
+	assert.Equal(t, "", matched)
+	assert.Equal(t, "Foobar", remaining)
+}
+
+func TestPrefixConsumer_Iterator_MustMatchWholeString(t *testing.T) {
+	pc := NewPrefixConsumer("foo")
+
+	// Iterator with MustMatchWholeString
+	// Should yield only if the whole string matches the prefix.
+	// Since iterator repeatedly consumes, if we match whole string, remaining is empty, so loop terminates.
+
+	iter := pc.Iterator("foo", consume.MustMatchWholeString(true))
+	count := 0
+	iter(func(matched, remaining string) bool {
+		count++
+		assert.Equal(t, "foo", matched)
+		assert.Equal(t, "", remaining)
+		return true
+	})
+	assert.Equal(t, 1, count)
+
+	// If not matching whole string
+	iter = pc.Iterator("foobar", consume.MustMatchWholeString(true))
+	count = 0
+	iter(func(matched, remaining string) bool {
+		count++
+		return true
+	})
+	assert.Equal(t, 0, count)
+}
