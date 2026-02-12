@@ -2,8 +2,10 @@ package strconsume
 
 import (
 	"bufio"
+	"bytes"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/arran4/go-consume"
 )
@@ -45,12 +47,18 @@ type UntilConsumer struct {
 // - consume.Ignore0PositionMatch(true): Ignores matches at the start of the string.
 // - consume.CaseInsensitive(true): Matches separators case-insensitively.
 // - consume.ConsumeRemainingIfNotFound(true): If no separator is found, return the whole string as matched, empty separator, and true.
+// - consume.Escape("string"): Specifies an escape string (e.g. "\\"). Can be specified multiple times.
+// - consume.Encasing{Start: "(", End: ")"}: Specifies an encasing pair. Can be specified multiple times.
+// - consume.EscapeBreaksEncasing(true): If true, escape strings work inside encasings.
 func (cu UntilConsumer) Consume(from string, ops ...any) (string, string, string, bool) {
 	inclusive := false
 	startOffset := 0
 	ignore0PositionMatch := false
 	caseInsensitive := false
 	consumeRemainingIfNotFound := false
+	var escapes []string
+	var encasings []consume.Encasing
+	escapeBreaksEncasing := false
 	for _, op := range ops {
 		switch v := op.(type) {
 		case consume.Inclusive:
@@ -63,9 +71,104 @@ func (cu UntilConsumer) Consume(from string, ops ...any) (string, string, string
 			caseInsensitive = bool(v)
 		case consume.ConsumeRemainingIfNotFound:
 			consumeRemainingIfNotFound = bool(v)
+		case consume.Escape:
+			if len(string(v)) == 0 {
+				panic("consume: escape string cannot be empty")
+			}
+			escapes = append(escapes, string(v))
+		case consume.Encasing:
+			if len(v.Start) == 0 {
+				panic("consume: encasing start cannot be empty")
+			}
+			encasings = append(encasings, v)
+		case consume.EscapeBreaksEncasing:
+			escapeBreaksEncasing = bool(v)
 		}
 	}
-	for i := startOffset; i < len(from); i++ {
+
+	var encasingStack []consume.Encasing
+
+	for i := startOffset; i < len(from); {
+		if len(encasingStack) > 0 {
+			current := encasingStack[len(encasingStack)-1]
+
+			if escapeBreaksEncasing && len(escapes) > 0 {
+				foundEscape := false
+				for _, esc := range escapes {
+					if strings.HasPrefix(from[i:], esc) {
+						i += len(esc)
+						if i < len(from) {
+							_, w := utf8.DecodeRuneInString(from[i:])
+							i += w
+						}
+						foundEscape = true
+						break
+					}
+				}
+				if foundEscape {
+					continue
+				}
+			}
+
+			if strings.HasPrefix(from[i:], current.End) {
+				encasingStack = encasingStack[:len(encasingStack)-1]
+				i += len(current.End)
+				continue
+			}
+
+			if current.Start != current.End {
+				foundStart := false
+				for _, enc := range encasings {
+					if strings.HasPrefix(from[i:], enc.Start) {
+						encasingStack = append(encasingStack, enc)
+						i += len(enc.Start)
+						foundStart = true
+						break
+					}
+				}
+				if foundStart {
+					continue
+				}
+			}
+
+			_, w := utf8.DecodeRuneInString(from[i:])
+			i += w
+			continue
+		}
+
+		if len(escapes) > 0 {
+			foundEscape := false
+			for _, esc := range escapes {
+				if strings.HasPrefix(from[i:], esc) {
+					i += len(esc)
+					if i < len(from) {
+						_, w := utf8.DecodeRuneInString(from[i:])
+						i += w
+					}
+					foundEscape = true
+					break
+				}
+			}
+			if foundEscape {
+				continue
+			}
+		}
+
+		if len(encasings) > 0 {
+			foundStart := false
+			for _, enc := range encasings {
+				if strings.HasPrefix(from[i:], enc.Start) {
+					encasingStack = append(encasingStack, enc)
+					i += len(enc.Start)
+					foundStart = true
+					break
+				}
+			}
+			if foundStart {
+				continue
+			}
+		}
+
 		for _, size := range cu.sizes {
 			if i+size > len(from) {
 				continue
@@ -92,7 +195,7 @@ func (cu UntilConsumer) Consume(from string, ops ...any) (string, string, string
 
 			if match {
 				if i == 0 && ignore0PositionMatch {
-					continue
+					break
 				}
 				matched := from[:i]
 				if inclusive {
@@ -101,6 +204,8 @@ func (cu UntilConsumer) Consume(from string, ops ...any) (string, string, string
 				return matched, separator, from[i:], true
 			}
 		}
+		_, w := utf8.DecodeRuneInString(from[i:])
+		i += w
 	}
 	if consumeRemainingIfNotFound {
 		return from, "", "", true
@@ -113,6 +218,9 @@ func (cu UntilConsumer) SplitFunc(ops ...any) bufio.SplitFunc {
 	startOffset := 0
 	ignore0PositionMatch := false
 	caseInsensitive := false
+	var escapes []string
+	var encasings []consume.Encasing
+	escapeBreaksEncasing := false
 	for _, op := range ops {
 		switch v := op.(type) {
 		case consume.Inclusive:
@@ -123,14 +231,120 @@ func (cu UntilConsumer) SplitFunc(ops ...any) bufio.SplitFunc {
 			ignore0PositionMatch = bool(v)
 		case consume.CaseInsensitive:
 			caseInsensitive = bool(v)
+		case consume.Escape:
+			if len(string(v)) == 0 {
+				panic("consume: escape string cannot be empty")
+			}
+			escapes = append(escapes, string(v))
+		case consume.Encasing:
+			if len(v.Start) == 0 {
+				panic("consume: encasing start cannot be empty")
+			}
+			encasings = append(encasings, v)
+		case consume.EscapeBreaksEncasing:
+			escapeBreaksEncasing = bool(v)
 		}
 	}
+	var escapesBytes [][]byte
+	for _, e := range escapes {
+		escapesBytes = append(escapesBytes, []byte(e))
+	}
+	type encasingBytes struct {
+		Start, End []byte
+	}
+	var encasingsBytes []encasingBytes
+	for _, e := range encasings {
+		encasingsBytes = append(encasingsBytes, encasingBytes{[]byte(e.Start), []byte(e.End)})
+	}
+
 	return func(data []byte, atEOF bool) (advance int, token []byte, err error) {
 		if atEOF && len(data) == 0 {
 			return 0, nil, nil
 		}
 
-		for i := startOffset; i < len(data); i++ {
+		var encasingStack []encasingBytes
+
+		for i := startOffset; i < len(data); {
+			if len(encasingStack) > 0 {
+				current := encasingStack[len(encasingStack)-1]
+
+				if escapeBreaksEncasing && len(escapesBytes) > 0 {
+					foundEscape := false
+					for _, esc := range escapesBytes {
+						if bytes.HasPrefix(data[i:], esc) {
+							i += len(esc)
+							if i < len(data) {
+								_, w := utf8.DecodeRune(data[i:])
+								i += w
+							}
+							foundEscape = true
+							break
+						}
+					}
+					if foundEscape {
+						continue
+					}
+				}
+
+				if bytes.HasPrefix(data[i:], current.End) {
+					encasingStack = encasingStack[:len(encasingStack)-1]
+					i += len(current.End)
+					continue
+				}
+
+				if !bytes.Equal(current.Start, current.End) {
+					foundStart := false
+					for _, enc := range encasingsBytes {
+						if bytes.HasPrefix(data[i:], enc.Start) {
+							encasingStack = append(encasingStack, enc)
+							i += len(enc.Start)
+							foundStart = true
+							break
+						}
+					}
+					if foundStart {
+						continue
+					}
+				}
+
+				_, w := utf8.DecodeRune(data[i:])
+				i += w
+				continue
+			}
+
+			if len(escapesBytes) > 0 {
+				foundEscape := false
+				for _, esc := range escapesBytes {
+					if bytes.HasPrefix(data[i:], esc) {
+						i += len(esc)
+						if i < len(data) {
+							_, w := utf8.DecodeRune(data[i:])
+							i += w
+						}
+						foundEscape = true
+						break
+					}
+				}
+				if foundEscape {
+					continue
+				}
+			}
+
+			if len(encasingsBytes) > 0 {
+				foundStart := false
+				for _, enc := range encasingsBytes {
+					if bytes.HasPrefix(data[i:], enc.Start) {
+						encasingStack = append(encasingStack, enc)
+						i += len(enc.Start)
+						foundStart = true
+						break
+					}
+				}
+				if foundStart {
+					continue
+				}
+			}
+
 			for _, size := range cu.sizes {
 				if i+size > len(data) {
 					continue
@@ -155,7 +369,7 @@ func (cu UntilConsumer) SplitFunc(ops ...any) bufio.SplitFunc {
 
 				if match {
 					if i == 0 && ignore0PositionMatch {
-						continue
+						break
 					}
 
 					advance = i + size
@@ -167,6 +381,8 @@ func (cu UntilConsumer) SplitFunc(ops ...any) bufio.SplitFunc {
 					return advance, token, nil
 				}
 			}
+			_, w := utf8.DecodeRune(data[i:])
+			i += w
 		}
 
 		if atEOF {

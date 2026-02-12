@@ -8,3 +8,9 @@ type MustBeAtEnd bool
 type CaseInsensitive bool
 type MustMatchWholeString bool
 type ConsumeRemainingIfNotFound bool
+
+type Escape string
+type Encasing struct {
+	Start, End string
+}
+type EscapeBreaksEncasing bool
