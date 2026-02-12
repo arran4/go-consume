@@ -218,6 +218,106 @@ func TestUntilConsumer_Consume(t *testing.T) {
 			expectedRemaining: "",
 			expectedOk:        true,
 		},
+		{
+			name:              "Escape character",
+			seps:              []string{":"},
+			input:             "foo\\:bar:baz",
+			ops:               []any{consume.Escape("\\"), consume.Inclusive(true)},
+			expectedMatched:   "foo\\:bar:",
+			expectedSeparator: ":",
+			expectedRemaining: "baz",
+			expectedOk:        true,
+		},
+		{
+			name:              "Escape string",
+			seps:              []string{":"},
+			input:             "fooESC:bar:baz",
+			ops:               []any{consume.Escape("ESC"), consume.Inclusive(true)},
+			expectedMatched:   "fooESC:bar:",
+			expectedSeparator: ":",
+			expectedRemaining: "baz",
+			expectedOk:        true,
+		},
+		{
+			name:              "Encasing quotes",
+			seps:              []string{":"},
+			input:             `foo"bar:baz":qux`,
+			ops:               []any{consume.Encasing{Start: "\"", End: "\""}, consume.Inclusive(true)},
+			expectedMatched:   `foo"bar:baz":`,
+			expectedSeparator: ":",
+			expectedRemaining: "qux",
+			expectedOk:        true,
+		},
+		{
+			name:              "Encasing brackets",
+			seps:              []string{":"},
+			input:             `foo(bar:baz):qux`,
+			ops:               []any{consume.Encasing{Start: "(", End: ")"}, consume.Inclusive(true)},
+			expectedMatched:   `foo(bar:baz):`,
+			expectedSeparator: ":",
+			expectedRemaining: "qux",
+			expectedOk:        true,
+		},
+		{
+			name:              "Encasing nested brackets",
+			seps:              []string{":"},
+			input:             `foo((bar:baz)):qux`,
+			ops:               []any{consume.Encasing{Start: "(", End: ")"}, consume.Inclusive(true)},
+			expectedMatched:   `foo((bar:baz)):`,
+			expectedSeparator: ":",
+			expectedRemaining: "qux",
+			expectedOk:        true,
+		},
+		{
+			name:              "Escape breaks encasing",
+			seps:              []string{":"},
+			input:             `foo"bar\"baz":qux`,
+			ops:               []any{consume.Encasing{Start: "\"", End: "\""}, consume.Escape("\\"), consume.EscapeBreaksEncasing(true), consume.Inclusive(true)},
+			expectedMatched:   `foo"bar\"baz":`,
+			expectedSeparator: ":",
+			expectedRemaining: "qux",
+			expectedOk:        true,
+		},
+		{
+			name:              "Escape at end",
+			seps:              []string{":"},
+			input:             "foo\\",
+			ops:               []any{consume.Escape("\\"), consume.Inclusive(true)},
+			expectedMatched:   "",
+			expectedSeparator: "",
+			expectedRemaining: "foo\\",
+			expectedOk:        false,
+		},
+		{
+			name:              "Encasing Start same as Separator",
+			seps:              []string{"("},
+			input:             "((foo))",
+			ops:               []any{consume.Encasing{Start: "(", End: ")"}, consume.Inclusive(true)},
+			expectedMatched:   "",
+			expectedSeparator: "",
+			expectedRemaining: "((foo))",
+			expectedOk:        false,
+		},
+		{
+			name:              "Mixed Nesting: Quotes inside brackets",
+			seps:              []string{":"},
+			input:             `(")")`,
+			ops:               []any{consume.Encasing{Start: "(", End: ")"}, consume.Encasing{Start: "\"", End: "\""}, consume.Inclusive(true)},
+			expectedMatched:   "",
+			expectedSeparator: "",
+			expectedRemaining: `(")")`,
+			expectedOk:        false,
+		},
+		{
+			name:              "Mixed Nesting: Brackets inside quotes",
+			seps:              []string{":"},
+			input:             `"( )"`,
+			ops:               []any{consume.Encasing{Start: "(", End: ")"}, consume.Encasing{Start: "\"", End: "\""}, consume.Inclusive(true)},
+			expectedMatched:   "",
+			expectedSeparator: "",
+			expectedRemaining: `"( )"`,
+			expectedOk:        false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -266,4 +366,61 @@ func TestUntilConsumer_Iterator_ConsumeRemainingIfNotFound(t *testing.T) {
 		return true
 	})
 	assert.Equal(t, []string{"foobar", ""}, results)
+}
+
+func TestUntilConsumer_SplitFunc_Features(t *testing.T) {
+	cu := NewUntilConsumer(":")
+
+	t.Run("Escape character", func(t *testing.T) {
+		split := cu.SplitFunc(
+			consume.Escape("\\"),
+			consume.Inclusive(true),
+		)
+		data := []byte("foo\\:bar:baz")
+		advance, token, err := split(data, false)
+		assert.NoError(t, err)
+		assert.Equal(t, 9, advance) // "foo\:bar:" len is 9
+		assert.Equal(t, "foo\\:bar:", string(token))
+	})
+
+	t.Run("Encasing", func(t *testing.T) {
+		split := cu.SplitFunc(
+			consume.Encasing{Start: "(", End: ")"},
+			consume.Inclusive(true),
+		)
+		data := []byte("foo(bar:baz):qux")
+		advance, token, err := split(data, false)
+		assert.NoError(t, err)
+		assert.Equal(t, 13, advance) // "foo(bar:baz):" len is 13
+		assert.Equal(t, "foo(bar:baz):", string(token))
+	})
+
+	t.Run("Mixed Nesting", func(t *testing.T) {
+		split := cu.SplitFunc(
+			consume.Encasing{Start: "(", End: ")"},
+			consume.Encasing{Start: "\"", End: "\""},
+			consume.Inclusive(true),
+		)
+		data := []byte(`(")")`)
+		advance, token, err := split(data, true)
+		assert.NoError(t, err)
+		assert.Equal(t, 5, advance)
+		assert.Equal(t, `(")")`, string(token))
+	})
+}
+
+func TestUntilConsumer_Validation(t *testing.T) {
+	cu := NewUntilConsumer(":")
+
+	t.Run("Invalid Empty Escape", func(t *testing.T) {
+		assert.Panics(t, func() {
+			cu.Consume("foo", consume.Escape(""))
+		})
+	})
+
+	t.Run("Invalid Empty Encasing Start", func(t *testing.T) {
+		assert.Panics(t, func() {
+			cu.Consume("foo", consume.Encasing{Start: "", End: "x"})
+		})
+	})
 }
