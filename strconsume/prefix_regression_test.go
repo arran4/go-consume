@@ -2,9 +2,9 @@ package strconsume
 
 import (
 	"bufio"
+	"github.com/arran4/go-consume"
 	"strings"
 	"testing"
-	"github.com/arran4/go-consume"
 )
 
 func TestPrefixConsumer_Iterator_IgnoresOptions(t *testing.T) {
