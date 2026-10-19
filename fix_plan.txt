@@ -1,0 +1,77 @@
+1. Fix `PrefixConsumer.Iterator` completely. The issue with `Consume` is that it searches from `startOffset` through the entire string, which breaks the original `Iterator` contract (which only checks exactly at `from[startOffset:]`). It's much simpler and more correct to re-implement `Iterator` without using `Consume`, similarly to how we fixed `SplitFunc`, and loop/continue only when options tell us to skip matches. If a match fails, Iterator should `return`, NOT scan forward, unless we implement custom scanning behavior? Wait, the review states:
+"In Iterator, the branches for MustBeAtEnd, MustBeFollowedBy, and Ignore0PositionMatch still execute return. Contrast Consume, which continues searching. Reproduce NewPrefixConsumer("foo").Iterator("foofoo", consume.Ignore0PositionMatch(true)): it yields nothing, despite a valid second candidate. Preserve existing default sequential foo/bar iteration while permitting a later valid candidate when an option rejects the first."
+So if an option rejects the *current* prefix match at `0`, it should search forward (i.e. `startOffset++` and check again).
+But the review ALSO states: "Previously Iterator("xfoo") for a consumer containing "foo" yielded no token, since it only consumed a prefix at the current position. It now calls scanning Consume and emits "foo" despite the unmatched leading x. Preserve original sequential prefix-only behavior in the no-option path and where options do not explicitly permit searching later".
+This means `Iterator` generally only matches EXACTLY at the current offset. BUT if an option specifically skips a match (e.g. `Ignore0PositionMatch`), we shouldn't just terminate; we should skip it and continue. BUT `Ignore0PositionMatch` means skip the match at offset 0, so the next offset should be `offset + len(match)`? No, `offset + 1`?
+If `NewPrefixConsumer("foo").Iterator("foofoo", consume.Ignore0PositionMatch(true))` is called, it matches "foo" at 0. Since `Ignore0PositionMatch(true)`, it skips it. It should then continue from offset `len("foo")`, meaning it finds the second "foo".
+Oh, wait! The original iterator is: "match at 0. yield match, remaining". Next iteration: it starts from `remaining`. It doesn't scan!
+So if `Ignore0PositionMatch(true)` skips the first match, we should just advance `from` by `len(match)` and try again immediately at the new offset 0! Not scan forward byte-by-byte.
+
+2. Let's trace `PrefixConsumer.Iterator` logic.
+```go
+	firstRun := true
+	for {
+		// Only check at the start of `from`.
+		m, found := ps.LongestPrefix(from)
+		if !found {
+			return
+		}
+
+		// If found, check options.
+		// If any option fails, do we abort or skip?
+		// Review: "permitting a later valid candidate when an option rejects the first"
+		// If an option rejects it, we should skip this match by advancing `from = from[len(m):]` and continue. Wait! If we do that, we test the next prefix.
+		// Is that correct? Let's check `MustBeAtEnd`. If we match "foo" in "foobar", `MustBeAtEnd` is false. Do we return, or advance?
+		// If we advance by `len("foo")`, `from` becomes "bar". If "bar" matches a prefix, we might yield it. Is that right? Yes! "sequential prefix tokenization".
+
+		// Wait, if it yields NO token for "xfoo", it means it only matches prefixes sequentially.
+	}
+```
+Wait, let's read the exact wording of the review for 1 and 2:
+Review 1: "Iterator still aborts rejected candidates. ... Reproduce NewPrefixConsumer("foo").Iterator("foofoo", consume.Ignore0PositionMatch(true)): it yields nothing, despite a valid second candidate. Preserve existing default sequential foo/bar iteration while permitting a later valid candidate when an option rejects the first."
+Review 2: "Previously Iterator("xfoo") ... yielded no token, since it only consumed a prefix at the current position. It now calls scanning Consume and emits "foo" despite the unmatched leading x. Preserve original sequential prefix-only behavior in the no-option path and where options do not explicitly permit searching later;"
+
+So Iterator should NOT scan `xfoo`. It only matches prefixes at offset 0 sequentially.
+If `from` is `foofoo`, `LongestPrefix("foofoo")` returns `foo`.
+If `Ignore0PositionMatch` is true, the first `foo` is rejected. It should skip it. To skip it, what do we do? We advance `from` by `len(foo)` and loop!
+Then the next iteration sees `from` = `foo`. It matches `foo`. It yields `foo`.
+This maintains sequential prefix behavior without arbitrary byte scanning!
+
+3. `Ignore0PositionMatch` should only apply to the FIRST iteration!
+Review 3: "Medium — one-time options persist across iterator passes. ... Apply initial-position suppression only once (unless an intentional different contract is documented) and assert the full ordered sequence in a regression test."
+We should clear `Ignore0PositionMatch` and `StartOffset` after applying them once!
+
+4. `Inclusive(true)` calculation.
+Review 1: "Consume(from, Inclusive(true)) already returns before including the matched token... The iterator currently computes yieldedMatch = before + match... remaining[len(match):] panic... Design an option-independent consumed-position calculation..."
+If we rewrite Iterator to NOT use `Consume` and instead use `LongestPrefix`, we have full control over the string slicing without `Consume`'s complex return semantics.
+
+5. Let's fix `SplitFunc`.
+Review 2: "SplitFunc still accepts a provisional end-of-buffer as EOF. Within if mustBeAtEnd, the nextIdx == len(text) branch emits the token without checking atEOF... The check must require actual EOF; then reject foobar. Test the same scenario through a reader that provides small chunks."
+Review 4: "Ignored initial match and unmatched EOF behavior remain incorrect. ... the EOF fallback return len(data), data, nil emits arbitrary unmatched input as a token..."
+If EOF and no match, return 0, nil, nil!
+If ignored, `advance` the match length (so `offset += len(m)`) and continue the loop, OR if `SplitFunc` isn't scanning, wait, `SplitFunc` uses `StartOffset`, which skips bytes.
+
+Wait, `PrefixConsumer.SplitFunc` in the original code:
+```go
+func (ps *PrefixConsumer) SplitFunc(ops ...any) bufio.SplitFunc {
+	return func(data []byte, atEOF bool) (advance int, token []byte, err error) {
+		if atEOF && len(data) == 0 { return 0, nil, nil }
+		text := string(data)
+		matched, found := ps.LongestPrefix(text)
+		if found { return len(matched), []byte(matched), nil }
+		return 0, nil, nil
+	}
+}
+```
+The original `SplitFunc` ONLY checked at offset 0, and if no match, it returned `0, nil, nil`. This means if `text` doesn't start with a prefix, it stalls forever if `atEOF` is false, and at EOF it still returns `0, nil, nil` ending the scan.
+Wait, if `LongestPrefix(text)` is not found, and `atEOF` is true, original returns `0, nil, nil`. This means any trailing unmatched data is discarded.
+If `atEOF` is false, it returns `0, nil, nil`, asking for more data. But if it never matches, `bufio.Scanner` accumulates data until buffer full.
+Is this correct? Yes, `PrefixConsumer` as a split function expects the stream to be composed entirely of prefixes. If it's not, it fails to scan.
+
+Wait, review 4: "Ignore0PositionMatch still never searches for a later candidate; the EOF fallback return len(data), data, nil emits arbitrary unmatched input as a token, unlike the previous SplitFunc. Define and verify the intended skipped-prefix, StartOffset, advance, and trailing-unmatched-input contracts. Check scanner.Err() in addition to scanner.Scan(); a split function returning (0,nil,nil) indefinitely on growing unmatched input is not a valid resolution."
+Wait, if `PrefixConsumer` expects exactly prefixes, and the user provided `Ignore0PositionMatch`, how does it skip?
+In `SplitFunc`, if a prefix matches but is rejected (e.g. `Ignore0PositionMatch`), we shouldn't return `0, nil, nil` because it stalls. We should return `advance = len(m), token = nil, err = nil`!
+No, `SplitFunc` contract: `advance > 0, token == nil` means "skip these bytes".
+Yes! If we return `len(m), nil, nil`, `bufio.Scanner` drops those bytes and continues scanning!
+
+Let's do this!

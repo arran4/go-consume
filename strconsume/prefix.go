@@ -203,68 +203,81 @@ func (ps *PrefixConsumer) Consume(from string, ops ...any) (string, string, stri
 
 func (ps *PrefixConsumer) Iterator(from string, ops ...any) func(yield func(string, string) bool) {
 	return func(yield func(string, string) bool) {
-		var loopOps []any
-		firstRun := true
+		startOffset := 0
+		ignore0PositionMatch := false
+		var mustBeFollowedBy consume.MustBeFollowedBy
+		mustBeAtEnd := false
 
 		for _, op := range ops {
-			switch op.(type) {
+			switch v := op.(type) {
 			case consume.StartOffset:
-				// StartOffset only applies to the first run
-			default:
-				loopOps = append(loopOps, op)
+				startOffset = int(v)
+			case consume.Ignore0PositionMatch:
+				ignore0PositionMatch = bool(v)
+			case consume.MustBeFollowedBy:
+				mustBeFollowedBy = v
+			case consume.MustBeAtEnd:
+				mustBeAtEnd = bool(v)
 			}
 		}
 
-		for {
-			var currentOps []any
-			if firstRun {
-				currentOps = ops
-			} else {
-				currentOps = loopOps
+		if startOffset > 0 {
+			if startOffset >= len(from) {
+				return
 			}
+			from = from[startOffset:]
+		}
 
-			before, match, remaining, found := ps.Consume(from, currentOps...)
-			firstRun = false
-
-			if !found {
-				// To preserve empty prefix match on empty string as observed in previous behavior:
-				if len(from) == 0 {
-					m, ok := ps.LongestPrefix("")
-					if ok && m == "" {
-						yield("", "")
-					}
+		for {
+			if len(from) == 0 {
+				m, ok := ps.LongestPrefix("")
+				if ok && m == "" {
+					yield("", "")
 				}
 				return
 			}
 
-			inclusive := false
-			for _, op := range currentOps {
-				if v, ok := op.(consume.Inclusive); ok {
-					inclusive = bool(v)
+			match, found := ps.LongestPrefix(from)
+			if !found {
+				return
+			}
+
+			nextIdx := len(match)
+
+			// Option constraints evaluation
+			rejectMatch := false
+
+			if mustBeAtEnd && nextIdx != len(from) {
+				rejectMatch = true
+			}
+
+			if !rejectMatch && mustBeFollowedBy != nil && nextIdx < len(from) {
+				r, _ := utf8.DecodeRuneInString(from[nextIdx:])
+				if !mustBeFollowedBy(r) {
+					rejectMatch = true
 				}
 			}
 
-			yieldedMatch := match
-			if inclusive {
-				yieldedMatch = before + match
+			if !rejectMatch && ignore0PositionMatch {
+				rejectMatch = true
 			}
 
-			// In previous behavior `PrefixConsumer.Iterator`, `remaining` was `from[len(match):]`.
-			// Since we use Consume, it searches. For Iterator, we want it to behave like it matches ONLY at the start unless options skipped.
-			// Actually `Consume` returns `remaining = from[i:]` where `i` is the offset of match.
-			// So `remaining` still contains the match at the start.
-			// To match the `strings.TrimPrefix` / original iterator behavior where remaining starts AFTER the match:
-			// wait, if inclusive is false, the previous Iterator yielded `remaining = from[len(match):]`.
-			// And the next iteration started from `remaining`.
-			// So `Consume` returning `remaining = from[i:]` (which is `match + ...`) is problematic here if we just pass `remaining` to `yield`.
+			// Clear single-use options
+			ignore0PositionMatch = false
 
-			// We need `rem` to be what's AFTER the match.
-			// `before` is `from[:i]`. `match` is the match.
-			// So `rem = remaining[len(match):]`
+			if rejectMatch {
+				// If a match is rejected by options, advance past it to search for the next prefix match
+				if len(match) > 0 {
+					from = from[len(match):]
+					continue
+				} else {
+					return
+				}
+			}
 
-			rem := remaining[len(match):]
+			remaining := from[nextIdx:]
 
-			if !yield(yieldedMatch, rem) {
+			if !yield(match, remaining) {
 				return
 			}
 
@@ -272,17 +285,12 @@ func (ps *PrefixConsumer) Iterator(from string, ops ...any) func(yield func(stri
 				return
 			}
 
-			if inclusive {
-				from = remaining
-			} else {
-				from = rem
-			}
+			from = remaining
 		}
 	}
 }
 
 func (ps *PrefixConsumer) SplitFunc(ops ...any) bufio.SplitFunc {
-	inclusive := false
 	startOffset := 0
 	ignore0PositionMatch := false
 	var mustBeFollowedBy consume.MustBeFollowedBy
@@ -290,8 +298,6 @@ func (ps *PrefixConsumer) SplitFunc(ops ...any) bufio.SplitFunc {
 
 	for _, op := range ops {
 		switch v := op.(type) {
-		case consume.Inclusive:
-			inclusive = bool(v)
 		case consume.StartOffset:
 			startOffset = int(v)
 		case consume.Ignore0PositionMatch:
@@ -310,64 +316,83 @@ func (ps *PrefixConsumer) SplitFunc(ops ...any) bufio.SplitFunc {
 			return 0, nil, nil
 		}
 
-		text := string(data)
 		offset := 0
 		if firstRun {
 			offset = startOffset
-		}
-
-		if offset >= len(text) {
-			if atEOF {
-				return 0, nil, nil
-			}
-			return 0, nil, nil
-		}
-
-		for i := offset; i < len(text); i++ {
-			m, ok := ps.LongestPrefix(text[i:])
-			if !ok {
-				continue
-			}
-
-			nextIdx := i + len(m)
-
-			if mustBeAtEnd {
-				if nextIdx != len(text) {
-					continue
-				}
-				if !atEOF {
-					return 0, nil, nil
-				}
-			}
-
-			if mustBeFollowedBy != nil {
-				if nextIdx < len(text) {
-					r, _ := utf8.DecodeRuneInString(text[nextIdx:])
-					if !mustBeFollowedBy(r) {
-						continue
+			if offset > 0 {
+				// We need to advance past startOffset but return no token to skip bytes.
+				// However, if we don't have enough data, we wait.
+				if offset >= len(data) {
+					if atEOF {
+						advance = len(data)
+						firstRun = false
+						return advance, nil, nil
 					}
-				} else if !atEOF {
 					return 0, nil, nil
 				}
+				advance = offset
+				firstRun = false
+				return advance, nil, nil
 			}
-
-			if i == 0 && firstRun && ignore0PositionMatch {
-				continue
-			}
-
-			firstRun = false
-			advance = i + len(m)
-			if inclusive {
-				token = []byte(text[:advance])
-			} else {
-				token = []byte(m)
-			}
-			return advance, token, nil
 		}
 
-		if atEOF {
+		text := string(data)
+		m, ok := ps.LongestPrefix(text)
+
+		if !ok {
+			// If it doesn't match and atEOF is true, we must return the rest to avoid infinite loop.
+			if atEOF {
+				return len(data), nil, nil // Drop trailing unmatched bytes to avoid stall
+			}
 			return 0, nil, nil
 		}
-		return 0, nil, nil
+
+		nextIdx := len(m)
+		rejectMatch := false
+
+		if mustBeAtEnd {
+			if nextIdx != len(text) {
+				rejectMatch = true
+			} else if !atEOF {
+				return 0, nil, nil // Needs more data to ensure it's at EOF
+			}
+		}
+
+		if !rejectMatch && mustBeFollowedBy != nil {
+			if nextIdx < len(text) {
+				r, _ := utf8.DecodeRuneInString(text[nextIdx:])
+				if !mustBeFollowedBy(r) {
+					rejectMatch = true
+				}
+			} else if !atEOF {
+				return 0, nil, nil // Need more data to verify FollowedBy
+			}
+		}
+
+		if !rejectMatch && firstRun && ignore0PositionMatch {
+			rejectMatch = true
+		}
+
+		if rejectMatch {
+			// Wait, if it fails, shouldn't we skip this match or return an error?
+			// The original implementation just ignores the candidate.
+			ignore0PositionMatch = false
+			firstRun = false
+			// Skip this match by advancing past it and returning nil token
+			if len(m) > 0 {
+				return len(m), nil, nil
+			}
+			if atEOF {
+				return len(data), nil, nil
+			}
+			return 0, nil, nil
+		}
+
+		ignore0PositionMatch = false
+		firstRun = false
+
+		advance = len(m)
+		token = []byte(m)
+		return advance, token, nil
 	}
 }

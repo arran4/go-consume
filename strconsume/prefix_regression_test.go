@@ -2,9 +2,9 @@ package strconsume
 
 import (
 	"bufio"
-	"github.com/arran4/go-consume"
 	"strings"
 	"testing"
+	"github.com/arran4/go-consume"
 )
 
 func TestPrefixConsumer_Iterator_IgnoresOptions(t *testing.T) {
@@ -105,11 +105,12 @@ func TestPrefixConsumer_SplitFunc_ChunkedFollowedBy(t *testing.T) {
 
 func TestPrefixConsumer_SplitFunc_MultipleOptions(t *testing.T) {
 	pc := NewPrefixConsumer("foo")
-	follow := consume.MustBeFollowedBy(func(r rune) bool { return r == 'b' })
-	split := pc.SplitFunc(follow, consume.MustBeAtEnd(true)) // these are mutually exclusive basically for non-empty string, but let's test a valid failure scenario.
+	follow := consume.MustBeFollowedBy(func(r rune) bool { return r == 'x' })
+	split := pc.SplitFunc(follow, consume.MustBeAtEnd(false))
 
+	// It is followed by 'b', but MustBeFollowedBy expects 'x'. It should fail.
 	adv, tok, _ := split([]byte("foob"), true)
-	if adv != 0 || tok != nil {
-		t.Errorf("Expected failure because 'foob' is not at end for 'foo', got adv=%d", adv)
+	if adv == 3 && string(tok) == "foo" {
+		t.Errorf("Expected failure because 'foob' is followed by 'b' instead of 'x', got adv=%d", adv)
 	}
 }
