@@ -3,6 +3,7 @@ package strconsume
 import (
 	"bufio"
 	"slices"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/arran4/go-consume"
@@ -91,49 +92,85 @@ func NewPrefixConsumer(paths ...string) *PrefixConsumer {
 // LongestPrefix finds the longest string in the set of paths that is a prefix of the input text.
 // It returns the matching prefix and true if found, otherwise empty string and false.
 func (ps *PrefixConsumer) LongestPrefix(text string) (string, bool) {
+	match, found, _ := ps.longestPrefix(text, true)
+	return match, found
+}
+
+// longestPrefix also reports whether more bytes could complete a longer prefix.
+func (ps *PrefixConsumer) longestPrefix(text string, atEOF bool) (match string, found, needMore bool) {
 	curr := ps.root
-	match := ""
-	hasMatch := false
-
-	// Check match at root (empty string)
 	if curr.isEnd {
-		match = curr.fullPath
-		hasMatch = true
+		match, found = curr.fullPath, true
 	}
-
-	idx := 0
-	for idx < len(text) {
-		var next *trieNode
-		// Linear scan of children. Since we used CommonPaths logic (sorted), children are sorted by first char.
-		for _, child := range curr.children {
-			if len(child.segment) == 0 {
-				continue // Should not happen with valid LCP logic
-			}
-			if child.segment[0] == text[idx] {
-				segLen := len(child.segment)
-				// Check if full segment matches
-				if idx+segLen <= len(text) && text[idx:idx+segLen] == child.segment {
-					next = child
-					idx += segLen
-					break
-				} else {
-					// Mismatch within segment or text too short
-					return match, hasMatch
-				}
-			}
+	for idx := 0; ; {
+		if idx == len(text) {
+			return match, found, !atEOF && len(curr.children) > 0
 		}
-
+		var next *trieNode
+		for _, child := range curr.children {
+			if child.segment[0] != text[idx] {
+				continue
+			}
+			rest := text[idx:]
+			if len(rest) < len(child.segment) && strings.HasPrefix(child.segment, rest) {
+				return match, found, !atEOF
+			}
+			if !strings.HasPrefix(rest, child.segment) {
+				return match, found, false
+			}
+			next = child
+			idx += len(child.segment)
+			break
+		}
 		if next == nil {
-			return match, hasMatch
+			return match, found, false
 		}
 		curr = next
 		if curr.isEnd {
-			match = curr.fullPath
-			hasMatch = true
+			match, found = curr.fullPath, true
 		}
 	}
+}
 
-	return match, hasMatch
+type prefixOptions struct {
+	inclusive   bool
+	startOffset int
+	ignore0     bool
+	followedBy  consume.MustBeFollowedBy
+	atEnd       bool
+}
+
+func parsePrefixOptions(ops []any) (o prefixOptions) {
+	for _, op := range ops {
+		switch v := op.(type) {
+		case consume.Inclusive:
+			o.inclusive = bool(v)
+		case consume.StartOffset:
+			o.startOffset = int(v)
+		case consume.Ignore0PositionMatch:
+			o.ignore0 = bool(v)
+		case consume.MustBeFollowedBy:
+			o.followedBy = v
+		case consume.MustBeAtEnd:
+			o.atEnd = bool(v)
+		}
+	}
+	if o.startOffset < 0 {
+		o.startOffset = 0
+	}
+	return o
+}
+
+// EOF is an accepted follower boundary, as in Consume's original contract.
+func (o prefixOptions) accepts(after string, atStart bool) bool {
+	if o.ignore0 && atStart || o.atEnd && len(after) != 0 {
+		return false
+	}
+	if o.followedBy != nil && len(after) != 0 {
+		r, _ := utf8.DecodeRuneInString(after)
+		return o.followedBy(r)
+	}
+	return true
 }
 
 // Consume scans the input string 'from' to find the longest matching prefix from the configured set.
@@ -145,254 +182,147 @@ func (ps *PrefixConsumer) LongestPrefix(text string) (string, bool) {
 // 4. found: True if a match was found, false otherwise.
 // Options:
 // - consume.Inclusive(true): If true, 'before' includes the matched prefix, and 'remaining' starts after it.
-// - consume.StartOffset(n): Starts the search at offset n.
-// - consume.Ignore0PositionMatch(true): Ignores matches at the very start of the search (offset).
-// - consume.MustBeFollowedBy(func(rune) bool): The match must be followed by a rune satisfying the predicate.
+// - consume.StartOffset(n): Starts the search at byte offset n; negative offsets mean zero.
+// - consume.Ignore0PositionMatch(true): Ignores matches at byte zero of the original input.
+// - consume.MustBeFollowedBy(func(rune) bool): A following rune must satisfy the predicate; EOF is accepted.
 // - consume.MustBeAtEnd(true): The match must be at the end of the string.
 func (ps *PrefixConsumer) Consume(from string, ops ...any) (string, string, string, bool) {
-	inclusive := false
-	startOffset := 0
-	ignore0PositionMatch := false
-	var mustBeFollowedBy consume.MustBeFollowedBy
-	mustBeAtEnd := false
-	for _, op := range ops {
-		switch v := op.(type) {
-		case consume.Inclusive:
-			inclusive = bool(v)
-		case consume.StartOffset:
-			startOffset = int(v)
-		case consume.Ignore0PositionMatch:
-			ignore0PositionMatch = bool(v)
-		case consume.MustBeFollowedBy:
-			mustBeFollowedBy = v
-		case consume.MustBeAtEnd:
-			mustBeAtEnd = bool(v)
-		}
-	}
-	for i := startOffset; i < len(from); i++ {
+	o := parsePrefixOptions(ops)
+	for i := o.startOffset; i < len(from); i++ {
 		match, found := ps.LongestPrefix(from[i:])
-		if found {
-			nextIdx := i + len(match)
-			if mustBeAtEnd {
-				if nextIdx != len(from) {
-					continue
-				}
-			}
-
-			if mustBeFollowedBy != nil {
-				if nextIdx < len(from) {
-					r, _ := utf8.DecodeRuneInString(from[nextIdx:])
-					if !mustBeFollowedBy(r) {
-						continue
-					}
-				}
-			}
-
-			if i == 0 && ignore0PositionMatch {
-				continue
-			}
-			matched := from[:i]
-			if inclusive {
-				return matched + match, match, from[i+len(match):], true
-			}
-			return matched, match, from[i:], true
+		if !found || !o.accepts(from[i+len(match):], i == 0) {
+			continue
 		}
+		if o.inclusive {
+			return from[:i+len(match)], match, from[i+len(match):], true
+		}
+		return from[:i], match, from[i:], true
 	}
 	return "", "", from, false
 }
 
+// Iterator yields (matched, remaining), with remaining always after the prefix.
+// It matches sequentially at the current position; after an option rejects a
+// candidate it searches byte by byte for a valid one, then resumes sequentially.
+// StartOffset applies only initially. Ignore0PositionMatch refers to byte zero
+// of the original input, independently of StartOffset. Negative offsets mean zero.
+// Inclusive includes input skipped since the last yield in matched; otherwise
+// matched is just the prefix. An accepted empty prefix is yielded once, then stops.
 func (ps *PrefixConsumer) Iterator(from string, ops ...any) func(yield func(string, string) bool) {
 	return func(yield func(string, string) bool) {
-		startOffset := 0
-		ignore0PositionMatch := false
-		var mustBeFollowedBy consume.MustBeFollowedBy
-		mustBeAtEnd := false
-
-		for _, op := range ops {
-			switch v := op.(type) {
-			case consume.StartOffset:
-				startOffset = int(v)
-			case consume.Ignore0PositionMatch:
-				ignore0PositionMatch = bool(v)
-			case consume.MustBeFollowedBy:
-				mustBeFollowedBy = v
-			case consume.MustBeAtEnd:
-				mustBeAtEnd = bool(v)
-			}
-		}
-
-		if startOffset > 0 {
-			if startOffset >= len(from) {
-				return
-			}
-			from = from[startOffset:]
-		}
-
-		for {
-			if len(from) == 0 {
-				m, ok := ps.LongestPrefix("")
-				if ok && m == "" {
-					yield("", "")
-				}
-				return
-			}
-
-			match, found := ps.LongestPrefix(from)
+		o := parsePrefixOptions(ops)
+		search := false
+		lastEnd := 0
+		for i := o.startOffset; i <= len(from); {
+			match, found := ps.LongestPrefix(from[i:])
 			if !found {
-				return
-			}
-
-			nextIdx := len(match)
-
-			// Option constraints evaluation
-			rejectMatch := false
-
-			if mustBeAtEnd && nextIdx != len(from) {
-				rejectMatch = true
-			}
-
-			if !rejectMatch && mustBeFollowedBy != nil && nextIdx < len(from) {
-				r, _ := utf8.DecodeRuneInString(from[nextIdx:])
-				if !mustBeFollowedBy(r) {
-					rejectMatch = true
-				}
-			}
-
-			if !rejectMatch && ignore0PositionMatch {
-				rejectMatch = true
-			}
-
-			// Clear single-use options
-			ignore0PositionMatch = false
-
-			if rejectMatch {
-				// If a match is rejected by options, advance past it to search for the next prefix match
-				if len(match) > 0 {
-					from = from[len(match):]
-					continue
-				} else {
+				if !search {
 					return
 				}
+				i++
+				continue
 			}
-
-			remaining := from[nextIdx:]
-
-			if !yield(match, remaining) {
+			end := i + len(match)
+			if !o.accepts(from[end:], i == 0) {
+				search = true
+				i++
+				continue
+			}
+			matched := match
+			if o.inclusive {
+				matched = from[lastEnd:end]
+			}
+			if !yield(matched, from[end:]) || len(match) == 0 {
 				return
 			}
-
-			if len(match) == 0 {
-				return
-			}
-
-			from = remaining
+			i, lastEnd, search = end, end, false
 		}
 	}
 }
 
+// SplitFunc emits only matching prefixes: Inclusive has no effect on scanner
+// tokens, which already include the entire prefix. Skipped input is discarded.
+// Position options and rejection searches follow Iterator's contract. A definite
+// mismatch during sequential matching ends scanning without emitting unmatched
+// data. A prefix is held until a longer match and all constraints can be decided.
+// An accepted empty prefix emits one final empty token and terminates scanning.
+// Each returned split function holds state for one scanner.
 func (ps *PrefixConsumer) SplitFunc(ops ...any) bufio.SplitFunc {
-	startOffset := 0
-	ignore0PositionMatch := false
-	var mustBeFollowedBy consume.MustBeFollowedBy
-	mustBeAtEnd := false
-
-	for _, op := range ops {
-		switch v := op.(type) {
-		case consume.StartOffset:
-			startOffset = int(v)
-		case consume.Ignore0PositionMatch:
-			ignore0PositionMatch = bool(v)
-		case consume.MustBeFollowedBy:
-			mustBeFollowedBy = v
-		case consume.MustBeAtEnd:
-			mustBeAtEnd = bool(v)
-		}
-	}
-
-	firstRun := true
-
+	o := parsePrefixOptions(ops)
+	skip := o.startOffset
+	atStart := true
+	search := false
+	done := false
 	return func(data []byte, atEOF bool) (advance int, token []byte, err error) {
-		if atEOF && len(data) == 0 {
-			return 0, nil, nil
+		if done {
+			return 0, nil, bufio.ErrFinalToken
 		}
-
 		offset := 0
-		if firstRun {
-			offset = startOffset
-			if offset > 0 {
-				// We need to advance past startOffset but return no token to skip bytes.
-				// However, if we don't have enough data, we wait.
-				if offset >= len(data) {
-					if atEOF {
-						advance = len(data)
-						firstRun = false
-						return advance, nil, nil
-					}
-					return 0, nil, nil
-				}
-				advance = offset
-				firstRun = false
-				return advance, nil, nil
+		if skip > 0 {
+			n := min(skip, len(data))
+			skip -= n
+			if n > 0 {
+				atStart = false
 			}
+			if skip > 0 {
+				if atEOF {
+					done = true
+					return n, nil, bufio.ErrFinalToken
+				}
+				return n, nil, nil
+			}
+			// Evaluate the rest in this call: Scanner stops on a nil token at EOF.
+			offset = n
 		}
-
 		text := string(data)
-		m, ok := ps.LongestPrefix(text)
-
-		if !ok {
-			// If it doesn't match and atEOF is true, we must return the rest to avoid infinite loop.
-			if atEOF {
-				return len(data), nil, nil // Drop trailing unmatched bytes to avoid stall
-			}
-			return 0, nil, nil
-		}
-
-		nextIdx := len(m)
-		rejectMatch := false
-
-		if mustBeAtEnd {
-			if nextIdx != len(text) {
-				rejectMatch = true
-			} else if !atEOF {
-				return 0, nil, nil // Needs more data to ensure it's at EOF
-			}
-		}
-
-		if !rejectMatch && mustBeFollowedBy != nil {
-			if nextIdx < len(text) {
-				r, _ := utf8.DecodeRuneInString(text[nextIdx:])
-				if !mustBeFollowedBy(r) {
-					rejectMatch = true
+		for i := offset; i <= len(data); i++ {
+			match, found, needMore := ps.longestPrefix(text[i:], atEOF)
+			if needMore {
+				// Discard only bytes already ruled out by a rejection search.
+				if i > 0 {
+					atStart = false
 				}
-			} else if !atEOF {
-				return 0, nil, nil // Need more data to verify FollowedBy
+				return i, nil, nil
 			}
-		}
-
-		if !rejectMatch && firstRun && ignore0PositionMatch {
-			rejectMatch = true
-		}
-
-		if rejectMatch {
-			// Wait, if it fails, shouldn't we skip this match or return an error?
-			// The original implementation just ignores the candidate.
-			ignore0PositionMatch = false
-			firstRun = false
-			// Skip this match by advancing past it and returning nil token
-			if len(m) > 0 {
-				return len(m), nil, nil
+			if !found {
+				if !search {
+					done = true
+					return i, nil, bufio.ErrFinalToken
+				}
+				continue
 			}
-			if atEOF {
-				return len(data), nil, nil
+			end := i + len(match)
+			reject := o.ignore0 && atStart && i == 0 || o.atEnd && end != len(data)
+			if !reject && o.atEnd && !atEOF {
+				atStart = atStart && i == 0
+				return i, nil, nil
 			}
-			return 0, nil, nil
+			if !reject && o.followedBy != nil {
+				if !atEOF && (end == len(data) || !utf8.FullRune(data[end:])) {
+					atStart = atStart && i == 0
+					return i, nil, nil
+				}
+				if end < len(data) {
+					r, _ := utf8.DecodeRune(data[end:])
+					reject = !o.followedBy(r)
+				}
+			}
+			if reject {
+				search = true
+				continue
+			}
+			atStart, search = false, false
+			if len(match) == 0 {
+				done = true
+				return end, []byte{}, bufio.ErrFinalToken
+			}
+			return end, data[i:end], nil
 		}
-
-		ignore0PositionMatch = false
-		firstRun = false
-
-		advance = len(m)
-		token = []byte(m)
-		return advance, token, nil
+		atStart = atStart && len(data) == 0
+		if atEOF {
+			done = true
+			return len(data), nil, bufio.ErrFinalToken
+		}
+		return len(data), nil, nil
 	}
 }
