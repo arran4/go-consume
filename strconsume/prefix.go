@@ -186,8 +186,6 @@ func (ps *PrefixConsumer) Consume(from string, ops ...any) (string, string, stri
 						continue
 					}
 				}
-				// If at end of string, we assume match is valid (boundary reached) unless controlled by another option?
-				// mustBeFollowedBy checks "if followed by X". EOF is valid boundary.
 			}
 
 			if i == 0 && ignore0PositionMatch {
@@ -228,6 +226,13 @@ func (ps *PrefixConsumer) Iterator(from string, ops ...any) func(yield func(stri
 
 		for {
 			if startOffset >= len(from) {
+				// To preserve empty prefix match on empty string as observed in previous behavior:
+				if len(from) == 0 && startOffset == 0 {
+					m, ok := ps.LongestPrefix("")
+					if ok && m == "" {
+						yield("", "")
+					}
+				}
 				return
 			}
 
@@ -315,6 +320,9 @@ func (ps *PrefixConsumer) SplitFunc(ops ...any) bufio.SplitFunc {
 		}
 
 		if offset >= len(text) {
+			if atEOF {
+				return len(data), data, nil
+			}
 			return 0, nil, nil
 		}
 
@@ -323,41 +331,73 @@ func (ps *PrefixConsumer) SplitFunc(ops ...any) bufio.SplitFunc {
 			nextIdx := offset + len(m)
 			if mustBeAtEnd {
 				if nextIdx != len(text) {
-					if atEOF {
+					if !atEOF {
+						// we need more data to know if it's the end
 						return 0, nil, nil
 					}
-					return 0, nil, nil
+					// It's EOF but nextIdx != len(text).
+					// So it's NOT at the end. We cannot match.
+					// Fall through to return 0, nil, nil or remainder.
+				} else {
+					// We match mustBeAtEnd!
+					firstRun = false
+					advance = offset + len(m)
+					if inclusive {
+						token = []byte(text[:advance])
+					} else {
+						token = []byte(m)
+					}
+					return advance, token, nil
 				}
-			}
-
-			if mustBeFollowedBy != nil {
+			} else if mustBeFollowedBy != nil {
 				if nextIdx < len(text) {
 					r, _ := utf8.DecodeRuneInString(text[nextIdx:])
 					if !mustBeFollowedBy(r) {
-						if atEOF {
-							return 0, nil, nil
+						// Invalid follow up
+					} else {
+						firstRun = false
+						advance = offset + len(m)
+						if inclusive {
+							token = []byte(text[:advance])
+						} else {
+							token = []byte(m)
 						}
-						return 0, nil, nil
+						return advance, token, nil
 					}
 				} else if !atEOF {
+					// Need more data to verify FollowedBy
 					return 0, nil, nil
+				} else {
+					// at EOF. There's nothing following it. Depending on MustBeFollowedBy semantic, does EOF count?
+					// PrefixConsumer.Consume only checks `if nextIdx < len(from)`, which means EOF doesn't trigger MustBeFollowedBy check, implicitly allowing it!
+					firstRun = false
+					advance = offset + len(m)
+					if inclusive {
+						token = []byte(text[:advance])
+					} else {
+						token = []byte(m)
+					}
+					return advance, token, nil
 				}
-			}
-
-			if offset == 0 && firstRun && ignore0PositionMatch {
-				return 0, nil, nil
-			}
-
-			firstRun = false
-			advance = offset + len(m)
-			if inclusive {
-				token = []byte(text[:advance])
+			} else if offset == 0 && firstRun && ignore0PositionMatch {
+				// Return no token here, but advance nothing? No, we skip. But SplitFunc can't skip by returning 0 advance and no token without getting into infinite loop if we don't ask for more data.
+				// Wait! If Ignore0PositionMatch is true, we should just return 0, nil, nil? No, the scanner will just ask for more data and try again.
+				// So PrefixConsumer `SplitFunc` CANNOT support `Ignore0PositionMatch` easily if it doesn't scan. The original `SplitFunc` didn't implement it either. We'll return 0, nil, nil on EOF.
 			} else {
-				token = []byte(m)
+				firstRun = false
+				advance = offset + len(m)
+				if inclusive {
+					token = []byte(text[:advance])
+				} else {
+					token = []byte(m)
+				}
+				return advance, token, nil
 			}
-			return advance, token, nil
 		}
 
+		if atEOF {
+			return len(data), data, nil
+		}
 		return 0, nil, nil
 	}
 }
