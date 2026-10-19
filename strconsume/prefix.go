@@ -203,31 +203,32 @@ func (ps *PrefixConsumer) Consume(from string, ops ...any) (string, string, stri
 
 func (ps *PrefixConsumer) Iterator(from string, ops ...any) func(yield func(string, string) bool) {
 	return func(yield func(string, string) bool) {
-		inclusive := false
-		startOffset := 0
-		ignore0PositionMatch := false
-		var mustBeFollowedBy consume.MustBeFollowedBy
-		mustBeAtEnd := false
+		var loopOps []any
+		firstRun := true
 
 		for _, op := range ops {
-			switch v := op.(type) {
-			case consume.Inclusive:
-				inclusive = bool(v)
+			switch op.(type) {
 			case consume.StartOffset:
-				startOffset = int(v)
-			case consume.Ignore0PositionMatch:
-				ignore0PositionMatch = bool(v)
-			case consume.MustBeFollowedBy:
-				mustBeFollowedBy = v
-			case consume.MustBeAtEnd:
-				mustBeAtEnd = bool(v)
+				// StartOffset only applies to the first run
+			default:
+				loopOps = append(loopOps, op)
 			}
 		}
 
 		for {
-			if startOffset >= len(from) {
+			var currentOps []any
+			if firstRun {
+				currentOps = ops
+			} else {
+				currentOps = loopOps
+			}
+
+			before, match, remaining, found := ps.Consume(from, currentOps...)
+			firstRun = false
+
+			if !found {
 				// To preserve empty prefix match on empty string as observed in previous behavior:
-				if len(from) == 0 && startOffset == 0 {
+				if len(from) == 0 {
 					m, ok := ps.LongestPrefix("")
 					if ok && m == "" {
 						yield("", "")
@@ -236,40 +237,34 @@ func (ps *PrefixConsumer) Iterator(from string, ops ...any) func(yield func(stri
 				return
 			}
 
-			match, found := ps.LongestPrefix(from[startOffset:])
-			if !found {
-				return
-			}
-
-			nextIdx := startOffset + len(match)
-
-			if mustBeAtEnd {
-				if nextIdx != len(from) {
-					return
+			inclusive := false
+			for _, op := range currentOps {
+				if v, ok := op.(consume.Inclusive); ok {
+					inclusive = bool(v)
 				}
 			}
-
-			if mustBeFollowedBy != nil {
-				if nextIdx < len(from) {
-					r, _ := utf8.DecodeRuneInString(from[nextIdx:])
-					if !mustBeFollowedBy(r) {
-						return
-					}
-				}
-			}
-
-			if startOffset == 0 && ignore0PositionMatch {
-				return
-			}
-
-			remaining := from[nextIdx:]
 
 			yieldedMatch := match
 			if inclusive {
-				yieldedMatch = from[:nextIdx]
+				yieldedMatch = before + match
 			}
 
-			if !yield(yieldedMatch, remaining) {
+			// In previous behavior `PrefixConsumer.Iterator`, `remaining` was `from[len(match):]`.
+			// Since we use Consume, it searches. For Iterator, we want it to behave like it matches ONLY at the start unless options skipped.
+			// Actually `Consume` returns `remaining = from[i:]` where `i` is the offset of match.
+			// So `remaining` still contains the match at the start.
+			// To match the `strings.TrimPrefix` / original iterator behavior where remaining starts AFTER the match:
+			// wait, if inclusive is false, the previous Iterator yielded `remaining = from[len(match):]`.
+			// And the next iteration started from `remaining`.
+			// So `Consume` returning `remaining = from[i:]` (which is `match + ...`) is problematic here if we just pass `remaining` to `yield`.
+
+			// We need `rem` to be what's AFTER the match.
+			// `before` is `from[:i]`. `match` is the match.
+			// So `rem = remaining[len(match):]`
+
+			rem := remaining[len(match):]
+
+			if !yield(yieldedMatch, rem) {
 				return
 			}
 
@@ -277,9 +272,11 @@ func (ps *PrefixConsumer) Iterator(from string, ops ...any) func(yield func(stri
 				return
 			}
 
-			from = remaining
-			startOffset = 0
-			ignore0PositionMatch = false
+			if inclusive {
+				from = remaining
+			} else {
+				from = rem
+			}
 		}
 	}
 }
@@ -321,82 +318,55 @@ func (ps *PrefixConsumer) SplitFunc(ops ...any) bufio.SplitFunc {
 
 		if offset >= len(text) {
 			if atEOF {
-				return len(data), data, nil
+				return 0, nil, nil
 			}
 			return 0, nil, nil
 		}
 
-		m, ok := ps.LongestPrefix(text[offset:])
-		if ok {
-			nextIdx := offset + len(m)
+		for i := offset; i < len(text); i++ {
+			m, ok := ps.LongestPrefix(text[i:])
+			if !ok {
+				continue
+			}
+
+			nextIdx := i + len(m)
+
 			if mustBeAtEnd {
 				if nextIdx != len(text) {
-					if !atEOF {
-						// we need more data to know if it's the end
-						return 0, nil, nil
-					}
-					// It's EOF but nextIdx != len(text).
-					// So it's NOT at the end. We cannot match.
-					// Fall through to return 0, nil, nil or remainder.
-				} else {
-					// We match mustBeAtEnd!
-					firstRun = false
-					advance = offset + len(m)
-					if inclusive {
-						token = []byte(text[:advance])
-					} else {
-						token = []byte(m)
-					}
-					return advance, token, nil
+					continue
 				}
-			} else if mustBeFollowedBy != nil {
+				if !atEOF {
+					return 0, nil, nil
+				}
+			}
+
+			if mustBeFollowedBy != nil {
 				if nextIdx < len(text) {
 					r, _ := utf8.DecodeRuneInString(text[nextIdx:])
 					if !mustBeFollowedBy(r) {
-						// Invalid follow up
-					} else {
-						firstRun = false
-						advance = offset + len(m)
-						if inclusive {
-							token = []byte(text[:advance])
-						} else {
-							token = []byte(m)
-						}
-						return advance, token, nil
+						continue
 					}
 				} else if !atEOF {
-					// Need more data to verify FollowedBy
 					return 0, nil, nil
-				} else {
-					// at EOF. There's nothing following it. Depending on MustBeFollowedBy semantic, does EOF count?
-					// PrefixConsumer.Consume only checks `if nextIdx < len(from)`, which means EOF doesn't trigger MustBeFollowedBy check, implicitly allowing it!
-					firstRun = false
-					advance = offset + len(m)
-					if inclusive {
-						token = []byte(text[:advance])
-					} else {
-						token = []byte(m)
-					}
-					return advance, token, nil
 				}
-			} else if offset == 0 && firstRun && ignore0PositionMatch {
-				// Return no token here, but advance nothing? No, we skip. But SplitFunc can't skip by returning 0 advance and no token without getting into infinite loop if we don't ask for more data.
-				// Wait! If Ignore0PositionMatch is true, we should just return 0, nil, nil? No, the scanner will just ask for more data and try again.
-				// So PrefixConsumer `SplitFunc` CANNOT support `Ignore0PositionMatch` easily if it doesn't scan. The original `SplitFunc` didn't implement it either. We'll return 0, nil, nil on EOF.
-			} else {
-				firstRun = false
-				advance = offset + len(m)
-				if inclusive {
-					token = []byte(text[:advance])
-				} else {
-					token = []byte(m)
-				}
-				return advance, token, nil
 			}
+
+			if i == 0 && firstRun && ignore0PositionMatch {
+				continue
+			}
+
+			firstRun = false
+			advance = i + len(m)
+			if inclusive {
+				token = []byte(text[:advance])
+			} else {
+				token = []byte(m)
+			}
+			return advance, token, nil
 		}
 
 		if atEOF {
-			return len(data), data, nil
+			return 0, nil, nil
 		}
 		return 0, nil, nil
 	}
