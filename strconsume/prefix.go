@@ -205,34 +205,159 @@ func (ps *PrefixConsumer) Consume(from string, ops ...any) (string, string, stri
 
 func (ps *PrefixConsumer) Iterator(from string, ops ...any) func(yield func(string, string) bool) {
 	return func(yield func(string, string) bool) {
+		inclusive := false
+		startOffset := 0
+		ignore0PositionMatch := false
+		var mustBeFollowedBy consume.MustBeFollowedBy
+		mustBeAtEnd := false
+
+		for _, op := range ops {
+			switch v := op.(type) {
+			case consume.Inclusive:
+				inclusive = bool(v)
+			case consume.StartOffset:
+				startOffset = int(v)
+			case consume.Ignore0PositionMatch:
+				ignore0PositionMatch = bool(v)
+			case consume.MustBeFollowedBy:
+				mustBeFollowedBy = v
+			case consume.MustBeAtEnd:
+				mustBeAtEnd = bool(v)
+			}
+		}
+
 		for {
-			matched, found := ps.LongestPrefix(from)
+			if startOffset >= len(from) {
+				return
+			}
+
+			match, found := ps.LongestPrefix(from[startOffset:])
 			if !found {
 				return
 			}
-			remaining := from[len(matched):]
-			if !yield(matched, remaining) {
+
+			nextIdx := startOffset + len(match)
+
+			if mustBeAtEnd {
+				if nextIdx != len(from) {
+					return
+				}
+			}
+
+			if mustBeFollowedBy != nil {
+				if nextIdx < len(from) {
+					r, _ := utf8.DecodeRuneInString(from[nextIdx:])
+					if !mustBeFollowedBy(r) {
+						return
+					}
+				}
+			}
+
+			if startOffset == 0 && ignore0PositionMatch {
 				return
 			}
-			if len(matched) == 0 {
+
+			remaining := from[nextIdx:]
+
+			yieldedMatch := match
+			if inclusive {
+				yieldedMatch = from[:nextIdx]
+			}
+
+			if !yield(yieldedMatch, remaining) {
 				return
 			}
+
+			if len(match) == 0 {
+				return
+			}
+
 			from = remaining
+			startOffset = 0
+			ignore0PositionMatch = false
 		}
 	}
 }
 
 func (ps *PrefixConsumer) SplitFunc(ops ...any) bufio.SplitFunc {
+	inclusive := false
+	startOffset := 0
+	ignore0PositionMatch := false
+	var mustBeFollowedBy consume.MustBeFollowedBy
+	mustBeAtEnd := false
+
+	for _, op := range ops {
+		switch v := op.(type) {
+		case consume.Inclusive:
+			inclusive = bool(v)
+		case consume.StartOffset:
+			startOffset = int(v)
+		case consume.Ignore0PositionMatch:
+			ignore0PositionMatch = bool(v)
+		case consume.MustBeFollowedBy:
+			mustBeFollowedBy = v
+		case consume.MustBeAtEnd:
+			mustBeAtEnd = bool(v)
+		}
+	}
+
+	firstRun := true
+
 	return func(data []byte, atEOF bool) (advance int, token []byte, err error) {
 		if atEOF && len(data) == 0 {
 			return 0, nil, nil
 		}
-		// This is inefficient but functional for now: convert to string
+
 		text := string(data)
-		matched, found := ps.LongestPrefix(text)
-		if found {
-			return len(matched), []byte(matched), nil
+		offset := 0
+		if firstRun {
+			offset = startOffset
 		}
+
+		if offset >= len(text) {
+			return 0, nil, nil
+		}
+
+		m, ok := ps.LongestPrefix(text[offset:])
+		if ok {
+			nextIdx := offset + len(m)
+			if mustBeAtEnd {
+				if nextIdx != len(text) {
+					if atEOF {
+						return 0, nil, nil
+					}
+					return 0, nil, nil
+				}
+			}
+
+			if mustBeFollowedBy != nil {
+				if nextIdx < len(text) {
+					r, _ := utf8.DecodeRuneInString(text[nextIdx:])
+					if !mustBeFollowedBy(r) {
+						if atEOF {
+							return 0, nil, nil
+						}
+						return 0, nil, nil
+					}
+				} else if !atEOF {
+					return 0, nil, nil
+				}
+			}
+
+			if offset == 0 && firstRun && ignore0PositionMatch {
+				return 0, nil, nil
+			}
+
+			firstRun = false
+			advance = offset + len(m)
+			if inclusive {
+				token = []byte(text[:advance])
+			} else {
+				token = []byte(m)
+			}
+			return advance, token, nil
+		}
+
 		return 0, nil, nil
 	}
 }
