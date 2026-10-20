@@ -204,12 +204,11 @@ func TestPrefixConsumer_Iterator(t *testing.T) {
 			name:     "Empty prefix",
 			prefixes: []string{""},
 			input:    "abc",
-			expected: []struct { // Should stop immediately to avoid infinite loop
+			expected: []struct {
 				matched string
 				rem     string
 			}{
-				// Actually, my implementation stops AFTER yielding empty match.
-				// But wait, if matched is empty, yield ("","abc"), then stops.
+				// Yield the empty match once, then stop.
 				{"", "abc"},
 			},
 		},
